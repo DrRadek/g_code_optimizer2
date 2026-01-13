@@ -88,7 +88,17 @@ class GCodeOptimizer2 : public nvapp::IAppElement
   };
 
 public:
-  GCodeOptimizer2()   = default;
+  struct Inputs
+  {
+    std::string stlFilePath        = "";
+    std::string vertFilePath       = "";
+    std::string indFilePath        = "";
+    std::string outputStlFilePath  = "";
+    std::string outputQuatFilePath = "";
+  } inputs;
+
+  GCodeOptimizer2(Inputs inputs)
+      : inputs(inputs) {};
   ~GCodeOptimizer2() override = default;
 
   //-------------------------------------------------------------------------------
@@ -193,6 +203,8 @@ public:
   //
   void onDetach() override
   {
+    SaveResult();
+
     NVVK_CHECK(vkQueueWaitIdle(m_app->getQueue(0).queue));
 
     VkDevice device = m_app->getDevice();
@@ -433,11 +445,7 @@ public:
         //nvsamples::importGltfData(m_sceneResource, planeModel, m_stagingUploader);   // Import the GLTF resources
       }
 
-      auto m_stlFilePath = "MyPath";
-	  triangles = nvsamples::loadStlResources(m_stlFilePath);
-	  nvsamples::importStlData(m_sceneResource, triangles, m_stagingUploader);
-	  auto vertices = nvsamples::exportVerticesFromStlTriangles(triangles);
-      m_aabbCompute.init(cmd, &m_allocator, std::span(aabb_compute_slang), vertices);
+      LoadStlData(cmd);
     }
 
     m_sceneResource.materials = {
@@ -1071,6 +1079,116 @@ public:
     }
   }
 
+  void LoadStlData(VkCommandBuffer cmd) {
+	  // Load and parse the data from file
+      if(inputs.stlFilePath == "")
+      {
+        if(inputs.vertFilePath == "")
+        {
+          std::string error = "Error: no input parameter found. Please specify either stl file path or binary vert array path.";
+          std::cout << error << "\n";
+          throw std::runtime_error(error);
+        }
+        else
+        {
+          std::ifstream vertices_stream(inputs.vertFilePath, std::ios::binary | std::ios::ate);
+          if(!vertices_stream)
+            throw new std::exception("Failed to open verts file");
+          std::streamsize        size = vertices_stream.tellg();
+          std::vector<glm::vec3> vertices(size / sizeof(glm::vec3));
+
+          vertices_stream.seekg(0, std::ios::beg);
+
+          vertices_stream.read(reinterpret_cast<char*>(vertices.data()), size);
+          vertices_stream.close();
+
+          if(inputs.indFilePath != "")
+          {
+            std::ifstream indices_stream(inputs.indFilePath, std::ios::binary | std::ios::ate);
+            if(!vertices_stream)
+              throw new std::exception("Failed to open indices file");
+            std::streamsize      size = indices_stream.tellg();
+            std::vector<int32_t> indices(size / sizeof(int32_t));
+            indices_stream.seekg(0, std::ios::beg);
+            indices_stream.read(reinterpret_cast<char*>(indices.data()), size);
+            indices_stream.close();
+            for(uint32_t i = 0; i < indices.size(); i += 3)
+            {
+              uint32_t v0, v1, v2;
+
+              openstl::Triangle t;
+              t.v0 = vertices[indices[i]];
+              t.v1 = vertices[indices[i + 1]];
+              t.v2 = vertices[indices[i + 2]];
+              triangles.push_back(t);
+            }
+          }
+          else
+          {
+            for(uint32_t i = 0; i < vertices.size(); i += 3)
+            {
+              openstl::Triangle t;
+              t.v0 = vertices[i];
+              t.v1 = vertices[i + 1];
+              t.v2 = vertices[i + 2];
+              triangles.push_back(t);
+            }
+          }
+
+          // Convert Cura Y-up to Z-up
+          for(auto& triangle : triangles)
+          {
+            std::swap(triangle.v0.y, triangle.v0.z);
+            std::swap(triangle.v1.y, triangle.v1.z);
+            std::swap(triangle.v2.y, triangle.v2.z);
+
+            triangle.v0.z = -triangle.v0.z;
+            triangle.v1.z = -triangle.v1.z;
+            triangle.v2.z = -triangle.v2.z;
+          }
+        }
+      }
+      else
+      {
+        // Load triangles from the stl file
+        triangles = nvsamples::loadStlResources(inputs.stlFilePath);
+      }
+
+	  // Import the data
+      nvsamples::importStlData(m_sceneResource, triangles, m_stagingUploader);
+      auto vertices = nvsamples::exportVerticesFromStlTriangles(triangles);
+      m_aabbCompute.init(cmd, &m_allocator, std::span(aabb_compute_slang), vertices);
+  }
+  void SaveResult() {
+    std::cout << "End...";
+
+    // Save final result
+    if(inputs.outputStlFilePath != "")
+    {
+      std::cout << "Saving stl...";
+      // Rotate
+      for(auto& triangle : triangles)
+      {
+        triangle.v0 = glm::vec4(triangle.v0, 0) * bestMatrix;
+        triangle.v1 = glm::vec4(triangle.v1, 0) * bestMatrix;
+        triangle.v2 = glm::vec4(triangle.v2, 0) * bestMatrix;
+      }
+
+      // Save as stl
+      nvsamples::SaveStlResources(inputs.outputStlFilePath, triangles);
+    }
+
+    if(inputs.outputQuatFilePath != "")
+    {
+      std::cout << "Saving quaternion...";
+      // Save as quaternion (this is used to rotate the model inside Cura)
+      auto          bestQuat = glm::quat_cast(bestMatrix);
+      std::ofstream quatOfstream(inputs.outputQuatFilePath);
+      quatOfstream << bestQuat.x << " " << bestQuat.y << " " << bestQuat.z << " " << bestQuat.w << "\n";
+      quatOfstream.close();
+    }
+  }
+
 private:
   // Other
   // Volume calculation
@@ -1142,11 +1260,17 @@ private:
 int main(int argc, char** argv)
 {
   nvapp::ApplicationCreateInfo appInfo{};
+  GCodeOptimizer2::Inputs   inputs;
 
   // Parsing the command line
   nvutils::ParameterParser   cli(nvutils::getExecutablePath().stem().string());
   nvutils::ParameterRegistry reg;
   reg.add({"headless", "Run in headless mode"}, &appInfo.headless, true);
+  reg.add({"stlfile", "STL file to optimize"}, &inputs.stlFilePath);
+  reg.add({"vertsfile", "STL file to optimize"}, &inputs.vertFilePath);
+  reg.add({"indsfile", "STL file to optimize"}, &inputs.indFilePath);
+  reg.add({"outputstlfile", "STL file to optimize"}, &inputs.outputStlFilePath);
+  reg.add({"outputquatfile", "STL file to optimize"}, &inputs.outputQuatFilePath);
   cli.add(reg);
   cli.parse(argc, argv);
 
@@ -1208,7 +1332,7 @@ int main(int argc, char** argv)
   application.init(appInfo);
 
   // Elements added to the application
-  auto tutorial   = std::make_shared<GCodeOptimizer2>();               // Our tutorial element
+  auto tutorial   = std::make_shared<GCodeOptimizer2>(inputs);               // Our tutorial element
   auto elemCamera = std::make_shared<nvapp::ElementCamera>();  // Element to control the camera movement
   auto windowTitle = std::make_shared<nvapp::ElementDefaultWindowTitle>();  // Element displaying the window title with application name and size
   auto windowMenu = std::make_shared<nvapp::ElementDefaultMenu>();  // Element displaying a menu, File->Exit ...
