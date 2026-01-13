@@ -99,14 +99,6 @@ PSout fragmentMain(VSout stage)
 
   GltfPunctual light = sceneInfo.punctualLights[0];  // Assuming we only use the first light for simplicity
 
-  if(sceneInfo.useSky == 1)
-  {
-    light.direction = sceneInfo.skySimpleParam.sunDirection;
-    light.color     = sceneInfo.skySimpleParam.sunColor;
-    light.intensity = sceneInfo.skySimpleParam.sunIntensity;
-    light.type      = GltfLightType::eDirectional;
-  }
-
   if(light.type == GltfLightType::ePoint)
   {
     light.direction = light.position - stage.worldPos;
@@ -152,14 +144,7 @@ PSout fragmentMain(VSout stage)
 
   // Apply ambient
   float3 ambient = sceneInfo.backgroundColor;
-  if(sceneInfo.useSky == 1)
-  {
-    // Add ambient lighting (sky effect)
-    float3 skyUpDir    = float3(0, 1, 0);
-    float3 groundColor = sceneInfo.skySimpleParam.groundColor;
-    float3 skyColor    = sceneInfo.skySimpleParam.skyColor;
-    float3 ambient     = lerp(groundColor, skyColor, dot(N, skyUpDir) * 0.5 + 0.5);
-  }
+
   // Add ambient to final color
   color += ambient * albedo * 0.025;
 

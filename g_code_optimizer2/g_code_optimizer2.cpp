@@ -50,7 +50,6 @@
 #include "shaders/shaderio.h"
 
 // Pre-compiled shaders
-#include "_autogen/sky_simple.slang.h"  // from nvpro_core2
 #include "_autogen/foundation.slang.h"  // Local shader
 #include "_autogen/rtbasic.slang.h"     // Local shader
 
@@ -61,8 +60,12 @@
 #include <nvapp/elem_default_title.hpp>      // Default title element
 #include <nvapp/elem_default_menu.hpp>       // Default menu element
 #include <nvgui/camera.hpp>                  // Camera widget
-#include <nvgui/sky.hpp>                     // Sky widget
-#include <nvshaders_host/sky.hpp>            // Sky shader
+
+#include "nvgui/property_editor.hpp"
+#include <nvvk/check_error.hpp>
+#include <nvvk/debug_util.hpp>
+#include <nvvk/resource_allocator.hpp>
+
 #include <nvslang/slang.hpp>                 // Slang compiler
 #include <nvutils/camera_manipulator.hpp>    // Camera manipulator
 #include <nvutils/logger.hpp>                // Logger for debug messages
@@ -162,9 +165,6 @@ public:
     compileAndCreateGraphicsShaders();    // Compile the graphics shaders and create the shader modules
     updateTextures();                     // Update the textures in the descriptor set (if any)
 
-    // Initialize the Sky with the pre-compiled shader
-    m_skySimple.init(&m_allocator, std::span(sky_simple_slang));
-
     // Get ray tracing properties
     VkPhysicalDeviceProperties2 prop2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
     prop2.pNext = &m_rtProperties;
@@ -216,7 +216,6 @@ public:
 
     m_gBuffers.deinit();
     m_stagingUploader.deinit();
-    m_skySimple.deinit();
     m_samplerPool.deinit();
 
     // Cleanup acceleration structures
@@ -233,7 +232,7 @@ public:
   }
 
   //---------------------------------------------------------------------------------------------------------------
-  // Rendering all UI elements, this includes the image of the GBuffer, the camera controls, and the sky parameters.
+  // Rendering all UI elements, this includes the image of the GBuffer, and the camera controls.
   // - Called every frame
   void onUIRender() override
   {
@@ -255,42 +254,36 @@ public:
         nvgui::CameraWidget(m_cameraManip);
       if(ImGui::CollapsingHeader("Environment"))
       {
-        ImGui::Checkbox("Use Sky", (bool*)&m_sceneResource.sceneInfo.useSky);
-        if(m_sceneResource.sceneInfo.useSky)
-          nvgui::skySimpleParametersUI(m_sceneResource.sceneInfo.skySimpleParam);
-        else
-        {
-          PE::begin();
-          PE::ColorEdit3("Background", (float*)&m_sceneResource.sceneInfo.backgroundColor);
-          PE::end();
-          // Light
-          PE::begin();
-          if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::ePoint
-             || m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-          {
-            PE::DragFloat3("Light Position", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].position), 1.0f,
-                           -20.0f, 20.0f, "%.2f", ImGuiSliderFlags_None, "Position of the light");
-          }
-          if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eDirectional
-             || m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-          {
-            PE::SliderFloat3("Light Direction", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].direction),
-                             -1.0f, 1.0f, "%.2f", ImGuiSliderFlags_None, "Direction of the light");
-          }
+		PE::begin();
+		PE::ColorEdit3("Background", (float*)&m_sceneResource.sceneInfo.backgroundColor);
+		PE::end();
+		// Light
+		PE::begin();
+		if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::ePoint
+			|| m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
+		{
+		PE::DragFloat3("Light Position", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].position), 1.0f,
+						-20.0f, 20.0f, "%.2f", ImGuiSliderFlags_None, "Position of the light");
+		}
+		if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eDirectional
+			|| m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
+		{
+		PE::SliderFloat3("Light Direction", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].direction),
+							-1.0f, 1.0f, "%.2f", ImGuiSliderFlags_None, "Direction of the light");
+		}
 
-          PE::SliderFloat("Light Intensity", &m_sceneResource.sceneInfo.punctualLights[0].intensity, 0.0f, 1000.0f,
-                          "%.2f", ImGuiSliderFlags_Logarithmic, "Intensity of the light");
-          PE::ColorEdit3("Light Color", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].color),
-                         ImGuiColorEditFlags_NoInputs, "Color of the light");
-          PE::Combo("Light Type", (int*)&m_sceneResource.sceneInfo.punctualLights[0].type, "Point\0Spot\0Directional\0",
-                    3, "Type of the light (Point, Spot, Directional)");
-          if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-          {
-            PE::SliderAngle("Cone Angle", &m_sceneResource.sceneInfo.punctualLights[0].coneAngle, 0.f, 90.f, "%.2f",
-                            ImGuiSliderFlags_AlwaysClamp, "Cone angle of the spot light");
-          }
-          PE::end();
-        }
+		PE::SliderFloat("Light Intensity", &m_sceneResource.sceneInfo.punctualLights[0].intensity, 0.0f, 1000.0f,
+						"%.2f", ImGuiSliderFlags_Logarithmic, "Intensity of the light");
+		PE::ColorEdit3("Light Color", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].color),
+						ImGuiColorEditFlags_NoInputs, "Color of the light");
+		PE::Combo("Light Type", (int*)&m_sceneResource.sceneInfo.punctualLights[0].type, "Point\0Spot\0Directional\0",
+				3, "Type of the light (Point, Spot, Directional)");
+		if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
+		{
+		PE::SliderAngle("Cone Angle", &m_sceneResource.sceneInfo.punctualLights[0].coneAngle, 0.f, 90.f, "%.2f",
+						ImGuiSliderFlags_AlwaysClamp, "Cone angle of the spot light");
+		}
+		PE::end();
       }
 
       ImGui::Separator();
@@ -425,7 +418,6 @@ public:
 
     // Scene information
     shaderio::GltfSceneInfo& sceneInfo = m_sceneResource.sceneInfo;
-    sceneInfo.useSky                   = false;                                         // Use light
     sceneInfo.instances = (shaderio::GltfInstance*)m_sceneResource.bInstances.address;  // Address of the instance buffer
     sceneInfo.meshes = (shaderio::GltfMesh*)m_sceneResource.bMeshes.address;            // Address of the mesh buffer
     sceneInfo.materials = (shaderio::GltfMetallicRoughness*)m_sceneResource.bMaterials.address;  // Address of the material buffer
@@ -634,18 +626,9 @@ public:
         .pValues    = &pushValues,  // Other values are passed later
     };
 
-    // Rendering the Sky
-    if(m_sceneResource.sceneInfo.useSky)
-    {
-      const glm::mat4& viewMatrix = m_cameraManip->getViewMatrix();
-      const glm::mat4& projMatrix = m_cameraManip->getPerspectiveMatrix();
-      m_skySimple.runCompute(cmd, m_app->getViewportSize(), viewMatrix, projMatrix,
-                             m_sceneResource.sceneInfo.skySimpleParam, m_gBuffers.getDescriptorImageInfo(eImgRendered));
-    }
-
     // Rendering to the GBuffer
     VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
-    colorAttachment.loadOp = m_sceneResource.sceneInfo.useSky ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;  // Load the previous content of the GBuffer color attachment (Sky rendering)
+    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.imageView  = m_gBuffers.getColorImageView(eImgRendered);
     colorAttachment.clearValue = {.color = {m_sceneResource.sceneInfo.backgroundColor.x,
                                             m_sceneResource.sceneInfo.backgroundColor.y,
@@ -1021,7 +1004,6 @@ private:
   nvsamples::GltfSceneResource m_sceneResource{};  // The GLTF scene resource, contains all the buffers and data for the scene
   std::vector<nvvk::Image> m_textures{};           // Textures used in the scene
 
-  nvshaders::SkySimple     m_skySimple{};       // Sky rendering
   glm::vec2 m_metallicRoughnessOverride{-0.01f, -0.01f};  // Override values for metallic and roughness, used in the UI to control the material properties
 
   // Ray Tracing Pipeline Components

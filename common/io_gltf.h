@@ -114,14 +114,12 @@ struct GltfSceneInfo
   float4x4               projInvMatrix;      // Inverse projection matrix for the scene
   float4x4               viewInvMatrix;      // Inverse view matrix for the scene
   float3                 cameraPosition;     // Camera position in world space
-  int                    useSky;             // Whether to use the sky rendering
   float3                 backgroundColor;    // Background color of the scene (used when not using sky)
   int                    numLights;          // Number of punctual lights in the scene (up to 2)
   GltfInstance*          instances;          // Address of the instance buffer containing GltfInstance data
   GltfMesh*              meshes;             // Address of the mesh buffer containing GltfMesh data
   GltfMetallicRoughness* materials;          // Material properties for the instance
   GltfPunctual           punctualLights[2];  // Array of punctual lights in the scene (up to 2)
-  SkySimpleParameters    skySimpleParam;     // Parameters for the sky rendering
 };
 CHECK_STRUCT_ALIGNMENT(GltfSceneInfo)
 
