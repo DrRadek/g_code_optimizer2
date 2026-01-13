@@ -37,13 +37,13 @@ function(setup_rt_tutorial_sample)
         
         # Add common files to make them visible in Visual Studio
         file(GLOB RT_COMMON_SOURCES "${RT_COMMON_DIR}/*.cpp" "${RT_COMMON_DIR}/*.hpp")
-        source_group("RtTutorial Common" FILES ${RT_COMMON_SOURCES})
+        source_group("g_code_optimizer2 Common" FILES ${RT_COMMON_SOURCES})
         list(APPEND ALL_SOURCES ${RT_COMMON_SOURCES})
     endif()
 
     # Add the executable
     add_executable(${PROJECT_NAME} ${ALL_SOURCES})
-    set_property(TARGET ${PROJECT_NAME} PROPERTY FOLDER "RtTutorial")
+    set_property(TARGET ${PROJECT_NAME} PROPERTY FOLDER "g_code_optimizer2")
 
     # Link libraries and include directories (consistent across all samples)
     target_link_libraries(${PROJECT_NAME} PRIVATE
