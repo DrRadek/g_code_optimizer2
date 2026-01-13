@@ -51,7 +51,6 @@
 
 // Pre-compiled shaders
 #include "_autogen/sky_simple.slang.h"  // from nvpro_core2
-#include "_autogen/tonemapper.slang.h"  //   "    "
 #include "_autogen/foundation.slang.h"  // Local shader
 #include "_autogen/rtbasic.slang.h"     // Local shader
 
@@ -63,9 +62,7 @@
 #include <nvapp/elem_default_menu.hpp>       // Default menu element
 #include <nvgui/camera.hpp>                  // Camera widget
 #include <nvgui/sky.hpp>                     // Sky widget
-#include <nvgui/tonemapper.hpp>              // Tonemapper widget
 #include <nvshaders_host/sky.hpp>            // Sky shader
-#include <nvshaders_host/tonemapper.hpp>     // Tonemapper shader
 #include <nvslang/slang.hpp>                 // Slang compiler
 #include <nvutils/camera_manipulator.hpp>    // Camera manipulator
 #include <nvutils/logger.hpp>                // Logger for debug messages
@@ -100,8 +97,7 @@ class RtBasic : public nvapp::IAppElement
   // Type of GBuffers
   enum
   {
-    eImgRendered,
-    eImgTonemapped
+    eImgRendered
   };
 
 public:
@@ -153,7 +149,7 @@ public:
     // Create the G-Buffers
     nvvk::GBufferInitInfo gBufferInit{
         .allocator      = &m_allocator,
-        .colorFormats   = {VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM},  // Render target, tonemapped
+        .colorFormats   = {VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM},  // Render target
         .depthFormat    = nvvk::findDepthFormat(m_app->getPhysicalDevice()),
         .imageSampler   = linearSampler,
         .descriptorPool = m_app->getTextureDescriptorPool(),
@@ -168,9 +164,6 @@ public:
 
     // Initialize the Sky with the pre-compiled shader
     m_skySimple.init(&m_allocator, std::span(sky_simple_slang));
-
-    // Initialize the tonemapper also with proe-compiled shader
-    m_tonemapper.init(&m_allocator, std::span(tonemapper_slang));
 
     // Get ray tracing properties
     VkPhysicalDeviceProperties2 prop2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -224,7 +217,6 @@ public:
     m_gBuffers.deinit();
     m_stagingUploader.deinit();
     m_skySimple.deinit();
-    m_tonemapper.deinit();
     m_samplerPool.deinit();
 
     // Cleanup acceleration structures
@@ -249,7 +241,7 @@ public:
     // Display the rendering GBuffer in the ImGui window ("Viewport")
     if(ImGui::Begin("Viewport"))
     {
-      ImGui::Image(ImTextureID(m_gBuffers.getDescriptorSet(eImgTonemapped)), ImGui::GetContentRegionAvail());
+      ImGui::Image(ImTextureID(m_gBuffers.getDescriptorSet(eImgRendered)), ImGui::GetContentRegionAvail());
     }
     ImGui::End();
 
@@ -300,10 +292,7 @@ public:
           PE::end();
         }
       }
-      if(ImGui::CollapsingHeader("Tonemapper"))
-      {
-        nvgui::tonemapperWidget(m_tonemapperData);
-      }
+
       ImGui::Separator();
       PE::begin();
       PE::SliderFloat2("Metallic/Roughness Override", glm::value_ptr(m_metallicRoughnessOverride), -0.01f, 1.0f, "%.2f",
@@ -339,7 +328,7 @@ public:
       rasterScene(cmd);
     }
 
-    postProcess(cmd);
+    //postProcess(cmd);
   }
 
   // Apply post-processing
@@ -347,9 +336,6 @@ public:
   {
     NVVK_DBG_SCOPE(cmd);  // <-- Helps to debug in NSight
 
-    // Default post-processing: tonemapping
-    m_tonemapper.runCompute(cmd, m_gBuffers.getSize(), m_tonemapperData, m_gBuffers.getDescriptorImageInfo(eImgRendered),
-                            m_gBuffers.getDescriptorImageInfo(eImgTonemapped));
 
     // Barrier to make sure the image is ready for been display
     nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
@@ -747,8 +733,7 @@ public:
 
   void onLastHeadlessFrame() override
   {
-    m_app->saveImageToFile(m_gBuffers.getColorImage(eImgTonemapped), m_gBuffers.getSize(),
-                           nvutils::getExecutablePath().replace_extension(".jpg").string());
+
   }
 
   // Accessor for camera manipulator
@@ -1037,8 +1022,6 @@ private:
   std::vector<nvvk::Image> m_textures{};           // Textures used in the scene
 
   nvshaders::SkySimple     m_skySimple{};       // Sky rendering
-  nvshaders::Tonemapper    m_tonemapper{};      // Tonemapper for post-processing effects
-  shaderio::TonemapperData m_tonemapperData{};  // Tonemapper data used to pass parameters to the tonemapper shader
   glm::vec2 m_metallicRoughnessOverride{-0.01f, -0.01f};  // Override values for metallic and roughness, used in the UI to control the material properties
 
   // Ray Tracing Pipeline Components
