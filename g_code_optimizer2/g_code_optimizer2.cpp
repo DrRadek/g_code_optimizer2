@@ -51,7 +51,7 @@
 
 // Pre-compiled shaders
 #include "_autogen/foundation.slang.h"  // Local shader
-#include "_autogen/rtbasic.slang.h"     // Local shader
+#include "_autogen/volume_calculation_rtx.slang.h"     // Local shader
 
 
 #include <nvaftermath/aftermath.hpp>         // Nsight Aftermath for crash tracking and shader debugging
@@ -95,7 +95,7 @@
 // It shows the rasterizer rendering of a scene with a teapot and a plane.
 // The tutorial is starting from this class, and will add the ray tracing rendering.
 //
-class RtBasic : public nvapp::IAppElement
+class GCodeOptimizer2 : public nvapp::IAppElement
 {
   // Type of GBuffers
   enum
@@ -104,8 +104,8 @@ class RtBasic : public nvapp::IAppElement
   };
 
 public:
-  RtBasic()           = default;
-  ~RtBasic() override = default;
+  GCodeOptimizer2()   = default;
+  ~GCodeOptimizer2() override = default;
 
   //-------------------------------------------------------------------------------
   // Create the what is needed
@@ -847,7 +847,7 @@ public:
       s.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 
     // Compile shader, fallback to pre-compiled
-    VkShaderModuleCreateInfo shaderCode = compileSlangShader("rtbasic.slang", rtbasic_slang);
+    VkShaderModuleCreateInfo shaderCode = compileSlangShader("volume_calculation_rtx.slang", volume_calculation_rtx_slang);
 
     stages[eRaygen].pNext     = &shaderCode;
     stages[eRaygen].pName     = "rgenMain";
@@ -1095,7 +1095,7 @@ int main(int argc, char** argv)
   application.init(appInfo);
 
   // Elements added to the application
-  auto tutorial   = std::make_shared<RtBasic>();               // Our tutorial element
+  auto tutorial   = std::make_shared<GCodeOptimizer2>();               // Our tutorial element
   auto elemCamera = std::make_shared<nvapp::ElementCamera>();  // Element to control the camera movement
   auto windowTitle = std::make_shared<nvapp::ElementDefaultWindowTitle>();  // Element displaying the window title with application name and size
   auto windowMenu = std::make_shared<nvapp::ElementDefaultMenu>();  // Element displaying a menu, File->Exit ...
