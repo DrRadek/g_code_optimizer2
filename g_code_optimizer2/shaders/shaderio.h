@@ -23,7 +23,7 @@
 
 NAMESPACE_SHADERIO_BEGIN()
 
-// Binding Points
+// Binding Points (rtx)
 enum BindingPoints
 {
   eTextures = 0,  // Binding point for textures
@@ -32,6 +32,16 @@ enum BindingPoints
   eOutVolume,	  // Output volume
 };
 
+// Rtx
+struct RtxPushConstant
+{
+  GltfSceneInfo* sceneInfoAddress;  // Address of the scene information buffer
+  float3         aabbMin;           // start of bounding box for volume calculation
+  float3         aabbMax;           // end of bounding box for volume calculation
+};
+
+
+// Raster
 struct TutoPushConstant
 {
   float3x3       normalMatrix;
@@ -40,11 +50,28 @@ struct TutoPushConstant
   float2         metallicRoughnessOverride;  // Metallic and roughness override values
 };
 
-struct RtxPushConstant
+
+// AABB
+#define AABB_SHADER_WG_SIZE 256
+
+struct AABB
 {
-  GltfSceneInfo* sceneInfoAddress;           // Address of the scene information buffer
-  float3         aabbMin;           // start of bounding box for volume calculation
-  float3         aabbMax;           // end of bounding box for volume calculation
+  float3 min;
+  float3 max;
+};
+
+enum aabb_Binding
+{
+  Vertices    = 0,
+  PartialAabb = 1,
+  OutAabb     = 2
+};
+
+struct aabb_Params
+{
+  uint     vertCount;
+  uint     groupSize;
+  float4x4 projInvMatrix;
 };
 
 

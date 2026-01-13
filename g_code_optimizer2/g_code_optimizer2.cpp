@@ -1,31 +1,3 @@
-/*
- * Copyright (c) 2023-2025, NVIDIA CORPORATION.  All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- *
- * SPDX-FileCopyrightText: Copyright (c) 2023-2025, NVIDIA CORPORATION.
- * SPDX-License-Identifier: Apache-2.0
- */
-
-//
-// Ray Tracing Tutorial - 02 Basic
-//
-// This is the sample before converting it to ray tracing.
-// You will find in 02_basic the first transformation of the shader and further,
-// different features of ray tracing.
-//
-
-
 // Enable the use of Nsight Aftermath for crash tracking and shader debugging
 // #define USE_NSIGHT_AFTERMATH  // (not always on, as it slows down the application)
 
@@ -83,10 +55,14 @@
 #include <nvutils/parameter_parser.hpp>      // Parameter parser
 
 
-#include "common/gltf_utils.hpp"  // GLTF utilities for loading and importing GLTF models
+// #include "common/gltf_utils.hpp"  // GLTF utilities for loading and importing GLTF models
 #include "common/utils.hpp"       // Common utilities for the sample application
 #include "common/path_utils.hpp"  // Path utilities for handling resources file paths
 
+// Other
+#include "aabb_compute.hpp"
+#include "stl_utils.hpp"
+#include "_autogen/aabb_compute.slang.h"
 
 //---------------------------------------------------------------------------------------
 // Ray Tracing Tutorial
@@ -168,7 +144,6 @@ public:
 	VkExtent2D   size                   = m_gBuffers.getSize();
     size_t       elemCount              = size.width * size.height;
     VkDeviceSize bufferSize             = elemCount * sizeof(float);
-    m_outVolumeCount                    = elemCount;
 
     // create buffer for volume calculations
     m_allocator.createBuffer(m_outVolumeBuffer, bufferSize == 0 ? 1 : bufferSize,
@@ -194,6 +169,8 @@ public:
     // Set up ray tracing pipeline infrastructure
     createRaytraceDescriptorLayout();  // Create descriptor layout
     createRayTracingPipeline();        // Create pipeline structure and SBT
+
+	m_aabbCompute.cleanupAfterInit(&m_allocator);
   }
 
   //-------------------------------------------------------------------------------
@@ -227,6 +204,7 @@ public:
 
     m_gBuffers.deinit();
     m_stagingUploader.deinit();
+    m_aabbCompute.deinit();
     m_samplerPool.deinit();
 
     // Cleanup acceleration structures
@@ -316,7 +294,6 @@ public:
     m_allocator.destroyBuffer(m_outVolumeBuffer);
     size_t       elemCount              = size.width * size.height;
     VkDeviceSize bufferSize             = elemCount * sizeof(float);
-    m_outVolumeCount                    = elemCount;
 
     m_allocator.createBuffer(m_outVolumeBuffer, bufferSize,
                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO);
@@ -334,6 +311,9 @@ public:
 
     // Update the scene information buffer, this cannot be done in between dynamic rendering
     updateSceneBuffer(cmd);
+
+	// Recalculate AABB
+	RecalculateAABB();
 
     if(m_useRayTracing)
     {
@@ -413,25 +393,28 @@ public:
 
       // Upload the GLTF resources to the GPU
       {
-        nvsamples::importGltfData(m_sceneResource, teapotModel, m_stagingUploader);  // Import the GLTF resources
-        nvsamples::importGltfData(m_sceneResource, planeModel, m_stagingUploader);   // Import the GLTF resources
+        //nvsamples::importGltfData(m_sceneResource, teapotModel, m_stagingUploader);  // Import the GLTF resources
+        //nvsamples::importGltfData(m_sceneResource, planeModel, m_stagingUploader);   // Import the GLTF resources
       }
+
+      auto m_stlFilePath = "MyPath";
+	  triangles = nvsamples::loadStlResources(m_stlFilePath);
+	  nvsamples::importStlData(m_sceneResource, triangles, m_stagingUploader);
+	  auto vertices = nvsamples::exportVerticesFromStlTriangles(triangles);
+      m_aabbCompute.init(cmd, &m_allocator, std::span(aabb_compute_slang), vertices);
     }
 
     m_sceneResource.materials = {
         // Teapot material
-        {.baseColorFactor = glm::vec4(0.8f, 1.0f, 0.6f, 1.0f), .metallicFactor = 0.5f, .roughnessFactor = 0.5f},
-        // Plane material with texture
-        {.baseColorFactor = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f), .metallicFactor = 0.1f, .roughnessFactor = 0.8f, .baseColorTextureIndex = 0}};
+        {.baseColorFactor = glm::vec4(0.8f, 1.0f, 0.6f, 1.0f), .metallicFactor = 0.5f, .roughnessFactor = 0.5f}
+	};
 
 
     m_sceneResource.instances = {
         // Teapot
-        {.transform     = glm::translate(glm::mat4(1), glm::vec3(0, 0, 0)) * glm::scale(glm::mat4(1), glm::vec3(0.5f)),
+        {.transform     = glm::translate(glm::mat4(1), glm::vec3(0, 0, 0)),
          .materialIndex = 0,
-         .meshIndex     = 0},
-        // Plane
-        {.transform = glm::scale(glm::translate(glm::mat4(1), glm::vec3(0, -0.9f, 0)), glm::vec3(2.f)), .materialIndex = 1, .meshIndex = 1},
+         .meshIndex     = 0}
     };
 
 
@@ -457,7 +440,7 @@ public:
 
     // Default camera
     m_cameraManip->setClipPlanes({0.01F, 100.0F});
-    m_cameraManip->setLookat({0.0F, 0.5F, 5.0}, {0.F, 0.F, 0.F}, {0.0F, 1.0F, 0.0F});
+    m_cameraManip->setLookat({0.0F, 0.5F, 50.0}, {0.F, 0.F, 0.F}, {0.0F, 1.0F, 0.0F});
   }
 
 
@@ -989,8 +972,8 @@ public:
     // Push constant information
     shaderio::RtxPushConstant pushValues{
         .sceneInfoAddress          = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,
-                                         .aabbMin = {-2,-2,-2},
-                                         .aabbMax = {2,2,2}
+		.aabbMin = aabbMin, 
+		.aabbMax = aabbMax
     };
     const VkPushConstantsInfo pushInfo{.sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
                                        .layout     = m_rtPipelineLayout,
@@ -1008,10 +991,32 @@ public:
     nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
   }
 
+  // Recalculate AABB (GPU implementation)
+  void RecalculateAABB() {
+    VkCommandBuffer cmd = m_app->createTempCmdBuffer();
+
+    auto sceneInfo = m_sceneResource.bSceneInfo;
+    auto matrix    = m_sceneResource.sceneInfo.viewInvMatrix;
+
+	m_aabbCompute.runCompute(cmd, matrix);
+    m_app->submitAndWaitTempCmdBuffer(cmd);
+
+	auto result = m_aabbCompute.readResult(&m_allocator);
+    aabbMin     = result.min;
+    aabbMax     = result.max;
+
+	aabbMax.z += glm::max(aabbMax.z * 0.00001f, 0.001f);  // Add small epsilon
+  }
+
 private:
   // Other
   nvvk::Buffer m_outVolumeBuffer;  // Buffer for volume calculations
-  int          m_outVolumeCount = 0;
+
+  nvshaders::AABBCompute      m_aabbCompute{};
+  glm::vec3                   aabbMin{-40, -40, -40};
+  glm::vec3                   aabbMax{40, 40, 40};
+  // Used to calculate AABB
+  std::vector<openstl::Triangle> triangles;
 
   // Application and core components
   nvapp::Application*     m_app{};             // The application framework
