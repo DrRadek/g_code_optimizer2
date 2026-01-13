@@ -60,9 +60,17 @@
 #include "common/path_utils.hpp"  // Path utilities for handling resources file paths
 
 // Other
-#include "aabb_compute.hpp"
+// STL utils
 #include "stl_utils.hpp"
+
+// AABB calculation
+#include "aabb_compute.hpp"
 #include "_autogen/aabb_compute.slang.h"
+
+// Volume calculation
+#include "volumesum_compute.hpp"
+#include "_autogen/volumesum_compute.slang.h"
+
 
 //---------------------------------------------------------------------------------------
 // Ray Tracing Tutorial
@@ -144,11 +152,16 @@ public:
 	VkExtent2D   size                   = m_gBuffers.getSize();
     size_t       elemCount              = size.width * size.height;
     VkDeviceSize bufferSize             = elemCount * sizeof(float);
+    VkDeviceSize bufferSizeForReduction = m_volumeSumCompute.calculateMaxGroups(elemCount) * sizeof(float);
+    m_outVolumeCount                    = elemCount;
 
     // create buffer for volume calculations
     m_allocator.createBuffer(m_outVolumeBuffer, bufferSize == 0 ? 1 : bufferSize,
                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO);
     NVVK_DBG_NAME(m_outVolumeBuffer.buffer);
+    m_allocator.createBuffer(m_outVolumeBufferForReduction, bufferSizeForReduction == 0 ? 1 : bufferSizeForReduction,
+                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO);
+    NVVK_DBG_NAME(m_outVolumeBufferForReduction.buffer);
 
     // Get ray tracing properties
     VkPhysicalDeviceProperties2 prop2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -171,6 +184,7 @@ public:
     createRayTracingPipeline();        // Create pipeline structure and SBT
 
 	m_aabbCompute.cleanupAfterInit(&m_allocator);
+    m_volumeSumCompute.init(&m_allocator, volumesum_compute_slang);
   }
 
   //-------------------------------------------------------------------------------
@@ -193,6 +207,7 @@ public:
     m_allocator.destroyBuffer(m_sceneResource.bMaterials);
     m_allocator.destroyBuffer(m_sceneResource.bInstances);
     m_allocator.destroyBuffer(m_outVolumeBuffer);  // Destroy volume buffer
+    m_allocator.destroyBuffer(m_outVolumeBufferForReduction);
     for(auto& gltfData : m_sceneResource.bGltfDatas)
     {
       m_allocator.destroyBuffer(gltfData);
@@ -205,6 +220,7 @@ public:
     m_gBuffers.deinit();
     m_stagingUploader.deinit();
     m_aabbCompute.deinit();
+    m_volumeSumCompute.deinit();
     m_samplerPool.deinit();
 
     // Cleanup acceleration structures
@@ -276,10 +292,19 @@ public:
       }
 
       ImGui::Separator();
-      PE::begin();
-      PE::SliderFloat2("Metallic/Roughness Override", glm::value_ptr(m_metallicRoughnessOverride), -0.01f, 1.0f, "%.2f",
-                       ImGuiSliderFlags_AlwaysClamp, "Override all material metallic and roughness");
-      PE::end();
+      //PE::begin();
+      //PE::SliderFloat2("Metallic/Roughness Override", glm::value_ptr(m_metallicRoughnessOverride), -0.01f, 1.0f, "%.2f",
+      //                 ImGuiSliderFlags_AlwaysClamp, "Override all material metallic and roughness");
+      //PE::end();
+      if(ImGui::CollapsingHeader("Other"))
+      {
+        PE::begin();
+        PE::SliderFloat3("Min aabb", glm::value_ptr(aabbMin), -21.0f, 21.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp, "Override aabb min");
+        PE::SliderFloat3("Max aabb", glm::value_ptr(aabbMax), -21.0f, 21.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp, "Override aabb max");
+        PE::SliderFloat("volume", &volume, 1e5, 1e8, "%.2f", ImGuiSliderFlags_AlwaysClamp, "volume");
+        PE::SliderFloat("min volume", &minVolume, 1e5, 1e8, "%.2f", ImGuiSliderFlags_AlwaysClamp, "min volume");
+        PE::end();
+      }
     }
     ImGui::End();
   }
@@ -288,16 +313,23 @@ public:
   // When the viewport is resized, the GBuffer must be resized
   // - Called when the Window "viewport is resized
   void onResize(VkCommandBuffer cmd, const VkExtent2D& size) { 
-	  NVVK_CHECK(m_gBuffers.update(cmd, size)); 
-  
+      NVVK_CHECK(m_gBuffers.update(cmd, size));
+
     // recreate outVolume buffer to match new size
     m_allocator.destroyBuffer(m_outVolumeBuffer);
     size_t       elemCount              = size.width * size.height;
     VkDeviceSize bufferSize             = elemCount * sizeof(float);
+    VkDeviceSize bufferSizeForReduction = m_volumeSumCompute.calculateMaxGroups(elemCount) * sizeof(float);
+    m_outVolumeCount                    = elemCount;
 
     m_allocator.createBuffer(m_outVolumeBuffer, bufferSize,
                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO);
     NVVK_DBG_NAME(m_outVolumeBuffer.buffer);
+
+    m_allocator.destroyBuffer(m_outVolumeBufferForReduction);
+    m_allocator.createBuffer(m_outVolumeBufferForReduction, bufferSizeForReduction == 0 ? 1 : bufferSizeForReduction,
+                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO);
+    NVVK_DBG_NAME(m_outVolumeBufferForReduction.buffer);
   }
 
   //---------------------------------------------------------------------------------------------------------------
@@ -309,6 +341,9 @@ public:
   {
     NVVK_DBG_SCOPE(cmd);  // <-- Helps to debug in NSight
 
+	// Calculate volume
+	GetVolumeCalculationResult();
+
     // Update the scene information buffer, this cannot be done in between dynamic rendering
     updateSceneBuffer(cmd);
 
@@ -318,6 +353,7 @@ public:
     if(m_useRayTracing)
     {
       raytraceScene(cmd);
+      CalculateVolume(cmd);
     }
     else
     {
@@ -1008,15 +1044,53 @@ public:
 	aabbMax.z += glm::max(aabbMax.z * 0.00001f, 0.001f);  // Add small epsilon
   }
 
+  void CalculateVolume(VkCommandBuffer cmd) {
+    m_volumeSumCompute.runCompute(cmd, m_outVolumeCount, &m_outVolumeBuffer, &m_outVolumeBufferForReduction);
+  }
+
+  void GetVolumeCalculationResult() {
+    if(m_volumeSumCompute.IsResultBufferValid())
+    {
+      VkCommandBuffer copyCmd = m_app->createTempCmdBuffer();
+      m_volumeSumCompute.recordCopyResultToStaging(copyCmd);
+      m_app->submitAndWaitTempCmdBuffer(copyCmd);
+
+      volume = m_volumeSumCompute.readResult();
+
+      if(minVolume > volume)
+      {
+        minVolume  = volume;
+        bestMatrix = m_sceneResource.sceneInfo.viewInvMatrix;
+      }
+    }
+    else
+    {
+	  // Note: this has to be called on next frame after rendering is done
+      // First frame doesn't have a reference to a buffer yet
+      std::cout << "invalid buffer\n\n";
+    }
+  }
+
 private:
   // Other
-  nvvk::Buffer m_outVolumeBuffer;  // Buffer for volume calculations
+  // Volume calculation
+  nvshaders::VolumeSumCompute m_volumeSumCompute{};
+  nvvk::Buffer                m_outVolumeBuffer;              // Buffer for volume calculations
+  nvvk::Buffer                m_outVolumeBufferForReduction;  // Buffer for volume reduction
+  int                         m_outVolumeCount = 0;
+  float                       volume    = 0;
+  float                       minVolume = std::numeric_limits<float>().max();
+  shaderio::float4x4          bestMatrix;  // Used to save the result
 
+  // AABB
   nvshaders::AABBCompute      m_aabbCompute{};
   glm::vec3                   aabbMin{-40, -40, -40};
   glm::vec3                   aabbMax{40, 40, 40};
   // Used to calculate AABB
   std::vector<openstl::Triangle> triangles;
+
+
+
 
   // Application and core components
   nvapp::Application*     m_app{};             // The application framework

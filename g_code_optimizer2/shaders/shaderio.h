@@ -74,5 +74,21 @@ struct aabb_Params
   float4x4 projInvMatrix;
 };
 
+// Volume calculation
+#define VOLUMESUM_SHADER_WG_SIZE 256
+
+enum volumesum_Binding
+{
+  PartialVolume = 1,
+  OutVolume     = 2
+};
+
+struct volume_Params
+{
+  uint arraySize;
+  uint groupSize;
+};
+
+
 
 NAMESPACE_SHADERIO_END()
