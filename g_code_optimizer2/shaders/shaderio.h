@@ -29,6 +29,7 @@ enum BindingPoints
   eTextures = 0,  // Binding point for textures
   eOutImage,      // Binding point for output image
   eTlas,          // Top-level acceleration structure
+  eOutVolume,	  // Output volume
 };
 
 struct TutoPushConstant
@@ -37,6 +38,13 @@ struct TutoPushConstant
   int            instanceIndex;              // Instance index for the current draw call
   GltfSceneInfo* sceneInfoAddress;           // Address of the scene information buffer
   float2         metallicRoughnessOverride;  // Metallic and roughness override values
+};
+
+struct RtxPushConstant
+{
+  GltfSceneInfo* sceneInfoAddress;           // Address of the scene information buffer
+  float3         aabbMin;           // start of bounding box for volume calculation
+  float3         aabbMax;           // end of bounding box for volume calculation
 };
 
 

@@ -165,6 +165,16 @@ public:
     compileAndCreateGraphicsShaders();    // Compile the graphics shaders and create the shader modules
     updateTextures();                     // Update the textures in the descriptor set (if any)
 
+	VkExtent2D   size                   = m_gBuffers.getSize();
+    size_t       elemCount              = size.width * size.height;
+    VkDeviceSize bufferSize             = elemCount * sizeof(float);
+    m_outVolumeCount                    = elemCount;
+
+    // create buffer for volume calculations
+    m_allocator.createBuffer(m_outVolumeBuffer, bufferSize == 0 ? 1 : bufferSize,
+                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO);
+    NVVK_DBG_NAME(m_outVolumeBuffer.buffer);
+
     // Get ray tracing properties
     VkPhysicalDeviceProperties2 prop2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
     prop2.pNext = &m_rtProperties;
@@ -205,6 +215,7 @@ public:
     m_allocator.destroyBuffer(m_sceneResource.bMeshes);
     m_allocator.destroyBuffer(m_sceneResource.bMaterials);
     m_allocator.destroyBuffer(m_sceneResource.bInstances);
+    m_allocator.destroyBuffer(m_outVolumeBuffer);  // Destroy volume buffer
     for(auto& gltfData : m_sceneResource.bGltfDatas)
     {
       m_allocator.destroyBuffer(gltfData);
@@ -298,7 +309,19 @@ public:
   //---------------------------------------------------------------------------------------------------------------
   // When the viewport is resized, the GBuffer must be resized
   // - Called when the Window "viewport is resized
-  void onResize(VkCommandBuffer cmd, const VkExtent2D& size) { NVVK_CHECK(m_gBuffers.update(cmd, size)); }
+  void onResize(VkCommandBuffer cmd, const VkExtent2D& size) { 
+	  NVVK_CHECK(m_gBuffers.update(cmd, size)); 
+  
+    // recreate outVolume buffer to match new size
+    m_allocator.destroyBuffer(m_outVolumeBuffer);
+    size_t       elemCount              = size.width * size.height;
+    VkDeviceSize bufferSize             = elemCount * sizeof(float);
+    m_outVolumeCount                    = elemCount;
+
+    m_allocator.createBuffer(m_outVolumeBuffer, bufferSize,
+                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO);
+    NVVK_DBG_NAME(m_outVolumeBuffer.buffer);
+  }
 
   //---------------------------------------------------------------------------------------------------------------
   // Rendering the scene
@@ -816,6 +839,10 @@ public:
                          .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                          .descriptorCount = 1,
                          .stageFlags      = VK_SHADER_STAGE_ALL});
+    bindings.addBinding({.binding         = shaderio::BindingPoints::eOutVolume,
+                         .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                         .descriptorCount = 1,
+                         .stageFlags      = VK_SHADER_STAGE_ALL});
 
     // Creating a PUSH descriptor set and set layout from the bindings
     m_rtDescPack.init(bindings, m_app->getDevice(), 0, VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR);
@@ -884,7 +911,7 @@ public:
     shader_groups.push_back(group);
 
     // Push constant: we want to be able to update constants used by the shaders
-    const VkPushConstantRange push_constant{VK_SHADER_STAGE_ALL, 0, sizeof(shaderio::TutoPushConstant)};
+    const VkPushConstantRange push_constant{VK_SHADER_STAGE_ALL, 0, sizeof(shaderio::RtxPushConstant)};
 
     VkPipelineLayoutCreateInfo pipeline_layout_create_info{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
     pipeline_layout_create_info.pushConstantRangeCount = 1;
@@ -955,17 +982,20 @@ public:
     write.append(m_rtDescPack.makeWrite(shaderio::BindingPoints::eTlas), m_asBuilder.tlas);
     write.append(m_rtDescPack.makeWrite(shaderio::BindingPoints::eOutImage), m_gBuffers.getColorImageView(eImgRendered),
                  VK_IMAGE_LAYOUT_GENERAL);
+    // Add volume buffer
+    write.append(m_rtDescPack.makeWrite(shaderio::BindingPoints::eOutVolume), m_outVolumeBuffer.buffer);
     vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_rtPipelineLayout, 1, write.size(), write.data());
 
     // Push constant information
-    shaderio::TutoPushConstant pushValues{
+    shaderio::RtxPushConstant pushValues{
         .sceneInfoAddress          = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,
-        .metallicRoughnessOverride = m_metallicRoughnessOverride,
+                                         .aabbMin = {-2,-2,-2},
+                                         .aabbMax = {2,2,2}
     };
     const VkPushConstantsInfo pushInfo{.sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
                                        .layout     = m_rtPipelineLayout,
                                        .stageFlags = VK_SHADER_STAGE_ALL,
-                                       .size       = sizeof(shaderio::TutoPushConstant),
+                                       .size       = sizeof(shaderio::RtxPushConstant),
                                        .pValues    = &pushValues};
     vkCmdPushConstants2(cmd, &pushInfo);
 
@@ -979,6 +1009,10 @@ public:
   }
 
 private:
+  // Other
+  nvvk::Buffer m_outVolumeBuffer;  // Buffer for volume calculations
+  int          m_outVolumeCount = 0;
+
   // Application and core components
   nvapp::Application*     m_app{};             // The application framework
   nvvk::ResourceAllocator m_allocator{};       // Resource allocator for Vulkan resources, used for buffers and images
