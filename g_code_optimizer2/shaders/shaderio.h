@@ -23,7 +23,7 @@
 
 NAMESPACE_SHADERIO_BEGIN()
 
-// Binding Points (rtx)
+// Binding Points (raster, rtx)
 enum BindingPoints
 {
   eTextures = 0,  // Binding point for textures
@@ -47,7 +47,8 @@ struct TutoPushConstant
   float3x3       normalMatrix;
   int            instanceIndex;              // Instance index for the current draw call
   GltfSceneInfo* sceneInfoAddress;           // Address of the scene information buffer
-  float2         metallicRoughnessOverride;  // Metallic and roughness override values
+  float3         aabbMin;                    // start of bounding box for volume calculation
+  float3         aabbMax;                    // end of bounding box for volume calculation
 };
 
 

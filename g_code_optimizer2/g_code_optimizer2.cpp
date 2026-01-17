@@ -22,7 +22,7 @@
 #include "shaders/shaderio.h"
 
 // Pre-compiled shaders
-#include "_autogen/foundation.slang.h"  // Local shader
+#include "_autogen/volume_calculation_raster.slang.h"  // Local shader
 #include "_autogen/volume_calculation_rtx.slang.h"     // Local shader
 
 
@@ -71,7 +71,7 @@
 #include "volumesum_compute.hpp"
 #include "_autogen/volumesum_compute.slang.h"
 
-
+#include <glm/gtx/quaternion.hpp>
 //---------------------------------------------------------------------------------------
 // Ray Tracing Tutorial
 //
@@ -84,7 +84,8 @@ class GCodeOptimizer2 : public nvapp::IAppElement
   // Type of GBuffers
   enum
   {
-    eImgRendered
+    eImgRendered,
+	eImgVolume
   };
 
 public:
@@ -146,7 +147,7 @@ public:
     // Create the G-Buffers
     nvvk::GBufferInitInfo gBufferInit{
         .allocator      = &m_allocator,
-        .colorFormats   = {VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R8G8B8A8_UNORM},  // Render target
+        .colorFormats = {VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R32_SFLOAT},  // Render target
         .depthFormat    = nvvk::findDepthFormat(m_app->getPhysicalDevice()),
         .imageSampler   = linearSampler,
         .descriptorPool = m_app->getTextureDescriptorPool(),
@@ -167,7 +168,8 @@ public:
 
     // create buffer for volume calculations
     m_allocator.createBuffer(m_outVolumeBuffer, bufferSize == 0 ? 1 : bufferSize,
-                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO);
+                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                             VMA_MEMORY_USAGE_AUTO);
     NVVK_DBG_NAME(m_outVolumeBuffer.buffer);
     m_allocator.createBuffer(m_outVolumeBufferForReduction, bufferSizeForReduction == 0 ? 1 : bufferSizeForReduction,
                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO);
@@ -257,7 +259,14 @@ public:
     // Display the rendering GBuffer in the ImGui window ("Viewport")
     if(ImGui::Begin("Viewport"))
     {
-      ImGui::Image(ImTextureID(m_gBuffers.getDescriptorSet(eImgRendered)), ImGui::GetContentRegionAvail());
+      if(m_useRayTracing)
+      {
+        ImGui::Image(ImTextureID(m_gBuffers.getDescriptorSet(eImgRendered)), ImGui::GetContentRegionAvail());
+	  }
+      else
+      {
+        ImGui::Image(ImTextureID(m_gBuffers.getDescriptorSet(eImgRendered)), ImGui::GetContentRegionAvail());
+      }
     }
     ImGui::End();
 
@@ -335,13 +344,16 @@ public:
     m_outVolumeCount                    = elemCount;
 
     m_allocator.createBuffer(m_outVolumeBuffer, bufferSize,
-                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO);
+                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                             VMA_MEMORY_USAGE_AUTO);
     NVVK_DBG_NAME(m_outVolumeBuffer.buffer);
 
     m_allocator.destroyBuffer(m_outVolumeBufferForReduction);
     m_allocator.createBuffer(m_outVolumeBufferForReduction, bufferSizeForReduction == 0 ? 1 : bufferSizeForReduction,
                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO);
     NVVK_DBG_NAME(m_outVolumeBufferForReduction.buffer);
+
+	updateTextures();
   }
 
   //---------------------------------------------------------------------------------------------------------------
@@ -356,21 +368,25 @@ public:
 	// Calculate volume
 	GetVolumeCalculationResult();
 
-    // Update the scene information buffer, this cannot be done in between dynamic rendering
-    updateSceneBuffer(cmd);
+	// Update view matrix
+	updateViewMatrixFromCamera();
 
 	// Recalculate AABB
-	RecalculateAABB();
+    RecalculateAABB();
+
+    // Update the scene information buffer, this cannot be done in between dynamic rendering
+    updateSceneBuffer(cmd);
 
     if(m_useRayTracing)
     {
       raytraceScene(cmd);
-      CalculateVolume(cmd);
     }
     else
     {
       rasterScene(cmd);
     }
+
+	CalculateVolume(cmd);
 
     //postProcess(cmd);
   }
@@ -471,7 +487,7 @@ public:
     sceneInfo.instances = (shaderio::GltfInstance*)m_sceneResource.bInstances.address;  // Address of the instance buffer
     sceneInfo.meshes = (shaderio::GltfMesh*)m_sceneResource.bMeshes.address;            // Address of the mesh buffer
     sceneInfo.materials = (shaderio::GltfMetallicRoughness*)m_sceneResource.bMaterials.address;  // Address of the material buffer
-    sceneInfo.backgroundColor             = {0.85f, 0.85f, 0.85f};                               // The background color
+    sceneInfo.backgroundColor             = {1.0f, 1.0f, 1.0f};                               // The background color
     sceneInfo.numLights                   = 1;
     sceneInfo.punctualLights[0].color     = glm::vec3(1.0f, 1.0f, 1.0f);
     sceneInfo.punctualLights[0].intensity = 4.0f;
@@ -483,7 +499,7 @@ public:
     m_app->submitAndWaitTempCmdBuffer(cmd);  // Submit the command buffer to upload the resources
 
     // Default camera
-    m_cameraManip->setClipPlanes({0.01F, 100.0F});
+    m_cameraManip->setClipPlanes({0.00F, 100.0F});
     m_cameraManip->setLookat({0.0F, 0.5F, 50.0}, {0.F, 0.F, 0.F}, {0.0F, 1.0F, 0.0F});
   }
 
@@ -497,6 +513,12 @@ public:
     bindings.addBinding({.binding         = shaderio::BindingPoints::eTextures,
                          .descriptorType  = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                          .descriptorCount = 10,  // Maximum number of textures used in the scene
+                         .stageFlags      = VK_SHADER_STAGE_ALL},
+                        VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
+                            | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
+    bindings.addBinding({.binding         = shaderio::BindingPoints::eOutVolume,
+                         .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                         .descriptorCount = 1,
                          .stageFlags      = VK_SHADER_STAGE_ALL},
                         VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
                             | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
@@ -534,20 +556,17 @@ public:
 
 
   //--------------------------------------------------------------------------------------------------
-  // Update the textures: this is called when the scene is loaded
-  // Textures are updated in the descriptor set (0)
+  // Update the volume buffer
   void updateTextures()
   {
-    if(m_textures.empty())
+    if(m_outVolumeBuffer.buffer == VK_NULL_HANDLE)
+    {
       return;
+    }
 
-    // Update the descriptor set with the textures
-    nvvk::WriteSetContainer write{};
-    VkWriteDescriptorSet    allTextures =
-        m_descPack.makeWrite(shaderio::BindingPoints::eTextures, 0, 0, uint32_t(m_textures.size()));
-    nvvk::Image* allImages = m_textures.data();
-    write.append(allTextures, allImages);
-    vkUpdateDescriptorSets(m_app->getDevice(), write.size(), write.data(), 0, nullptr);
+    /*nvvk::WriteSetContainer write{};
+    write.append(m_descPack.makeWrite(shaderio::BindingPoints::eOutVolume), m_outVolumeBuffer.buffer);
+	vkUpdateDescriptorSets(m_app->getDevice(), write.size(), write.data(), 0, nullptr);*/
   }
 
   // This function is used to compile the Slang shader, and when it fails, it will use the pre-compiled shaders
@@ -585,7 +604,7 @@ public:
     SCOPED_TIMER(__FUNCTION__);
 
     // Use pre-compiled shaders by default
-    VkShaderModuleCreateInfo shaderCode = compileSlangShader("foundation.slang", foundation_slang);
+    VkShaderModuleCreateInfo shaderCode = compileSlangShader("volume_calculation_raster.slang", volume_calculation_raster_slang);
 
     // Destroy the previous shaders if they exist
     vkDestroyShaderEXT(m_app->getDevice(), m_vertexShader, nullptr);
@@ -627,31 +646,41 @@ public:
     vkCreateShadersEXT(m_app->getDevice(), 1U, &shaderInfo, nullptr, &m_fragmentShader);
     NVVK_DBG_NAME(m_fragmentShader);
   }
+  glm::quat quaternionFromVector(const glm::vec3& targetDir, const glm::vec3& defaultDir = glm::vec3(0, 0, 1))
+  {
+    glm::vec3 from = glm::normalize(defaultDir);
+    glm::vec3 to   = glm::normalize(targetDir);
 
+    // glm::rotation handles 180-degree flips automatically
+    return glm::rotation(from, to);
+  }
   //---------------------------------------------------------------------------------------------------------------
   // The update of scene information buffer (UBO)
   //
   void updateSceneBuffer(VkCommandBuffer cmd)
   {
     NVVK_DBG_SCOPE(cmd);  // <-- Helps to debug in NSight
-    const glm::mat4& viewMatrix = m_cameraManip->getViewMatrix();
-    const glm::mat4& projMatrix = m_cameraManip->getPerspectiveMatrix();
+
+	glm::mat4 projMatrix = glm::orthoRH_ZO(aabbMin.x, aabbMax.x, aabbMax.y, aabbMin.y, -aabbMax.z - 1, -aabbMin.z - 1);
 
     m_sceneResource.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;   // Combine the view and projection matrices
     m_sceneResource.sceneInfo.projInvMatrix  = glm::inverse(projMatrix);  // Inverse projection matrix
-    m_sceneResource.sceneInfo.viewInvMatrix  = glm::inverse(viewMatrix);  // Inverse view matrix
+    m_sceneResource.sceneInfo.viewInvMatrix  = viewInvMatrix;  // Inverse view matrix
     m_sceneResource.sceneInfo.cameraPosition = m_cameraManip->getEye();   // Get the camera position
     m_sceneResource.sceneInfo.instances = (shaderio::GltfInstance*)m_sceneResource.bInstances.address;  // Get the address of the instance buffer
     m_sceneResource.sceneInfo.meshes = (shaderio::GltfMesh*)m_sceneResource.bMeshes.address;  // Get the address of the mesh buffer
     m_sceneResource.sceneInfo.materials = (shaderio::GltfMetallicRoughness*)m_sceneResource.bMaterials.address;  // Get the address of the material buffer
 
     // Making sure the scene information buffer is updated before rendering
-    // Wait that the fragment shader is done reading the previous scene information and wait for the transfer to complete
-    nvvk::cmdBufferMemoryBarrier(cmd, {m_sceneResource.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+    // Wait that the fragment and raytracing shader is done reading the previous scene information and wait for the transfer to complete
+    nvvk::cmdBufferMemoryBarrier(cmd, {m_sceneResource.bSceneInfo.buffer,
+                                       m_useRayTracing ? VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR :
+														 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                                        VK_PIPELINE_STAGE_2_TRANSFER_BIT});
     vkCmdUpdateBuffer(cmd, m_sceneResource.bSceneInfo.buffer, 0, sizeof(shaderio::GltfSceneInfo), &m_sceneResource.sceneInfo);
     nvvk::cmdBufferMemoryBarrier(cmd, {m_sceneResource.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                                       VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT});
+                                       m_useRayTracing ? VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR :
+                                                         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT});
   }
 
 
@@ -662,10 +691,13 @@ public:
   {
     NVVK_DBG_SCOPE(cmd);  // <-- Helps to debug in NSight
 
+	 auto viewportSize = m_app->getViewportSize();
+
     // Push constant information, see usage later
     shaderio::TutoPushConstant pushValues{
         .sceneInfoAddress = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,  // Pass the address of the scene information buffer to the shader
-        .metallicRoughnessOverride = m_metallicRoughnessOverride,  // Override the metallic and roughness values
+        .aabbMin = aabbMin,
+		.aabbMax = aabbMax
     };
     const VkPushConstantsInfo pushInfo{
         .sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
@@ -677,12 +709,18 @@ public:
     };
 
     // Rendering to the GBuffer
-    VkRenderingAttachmentInfo colorAttachment = DEFAULT_VkRenderingAttachmentInfo;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachment.imageView  = m_gBuffers.getColorImageView(eImgRendered);
-    colorAttachment.clearValue = {.color = {m_sceneResource.sceneInfo.backgroundColor.x,
+    VkRenderingAttachmentInfo colorAttachments[2] = {DEFAULT_VkRenderingAttachmentInfo, DEFAULT_VkRenderingAttachmentInfo};
+
+	// Img
+    colorAttachments[0].loadOp                 = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachments[0].imageView              = m_gBuffers.getColorImageView(eImgRendered);
+    colorAttachments[0].clearValue             = {.color = {m_sceneResource.sceneInfo.backgroundColor.x,
                                             m_sceneResource.sceneInfo.backgroundColor.y,
                                             m_sceneResource.sceneInfo.backgroundColor.z, 1.0f}};
+	// Volume
+    colorAttachments[1].loadOp                  = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	colorAttachments[1].imageView               = m_gBuffers.getColorImageView(eImgVolume);
+    colorAttachments[1].clearValue              = {.color = {1.0f, 1.0f, 1.0f, 1.0f}};
 
     VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
     depthAttachment.imageView                 = m_gBuffers.getDepthImageView();
@@ -691,12 +729,14 @@ public:
     // Create the rendering info
     VkRenderingInfo renderingInfo      = DEFAULT_VkRenderingInfo;
     renderingInfo.renderArea           = DEFAULT_VkRect2D(m_gBuffers.getSize());
-    renderingInfo.colorAttachmentCount = 1;
-    renderingInfo.pColorAttachments    = &colorAttachment;
+    renderingInfo.colorAttachmentCount = 2;
+    renderingInfo.pColorAttachments    = colorAttachments;
     renderingInfo.pDepthAttachment     = &depthAttachment;
 
     // Change the GBuffer layout to prepare for rendering (attachment)
     nvvk::cmdImageMemoryBarrier(cmd, {m_gBuffers.getColorImage(eImgRendered), VK_IMAGE_LAYOUT_GENERAL,
+                                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
+    nvvk::cmdImageMemoryBarrier(cmd, {m_gBuffers.getColorImage(eImgVolume), VK_IMAGE_LAYOUT_GENERAL,
                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL});
     nvvk::cmdImageMemoryBarrier(cmd, {m_gBuffers.getDepthImage(),
                                       VK_IMAGE_LAYOUT_UNDEFINED,
@@ -717,10 +757,28 @@ public:
     // ** BEGIN RENDERING **
     vkCmdBeginRendering(cmd, &renderingInfo);
 
+
+    m_dynamicPipeline.colorBlendEnables = {VK_FALSE, VK_FALSE};
+
+    m_dynamicPipeline.colorWriteMasks = {
+        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+        VK_COLOR_COMPONENT_R_BIT
+    };
+
+    VkColorBlendEquationEXT defaultBlendEq{};
+    defaultBlendEq.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+    defaultBlendEq.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+    defaultBlendEq.colorBlendOp        = VK_BLEND_OP_ADD;
+    defaultBlendEq.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    defaultBlendEq.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+    defaultBlendEq.alphaBlendOp        = VK_BLEND_OP_ADD;
+
+    m_dynamicPipeline.colorBlendEquations = {defaultBlendEq, defaultBlendEq};
+
     // All dynamic states are set here
     m_dynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;  // Don't cull any triangles (double-sided rendering)
     m_dynamicPipeline.cmdApplyAllStates(cmd);
-    m_dynamicPipeline.cmdSetViewportAndScissor(cmd, m_app->getViewportSize());
+    m_dynamicPipeline.cmdSetViewportAndScissor(cmd, viewportSize);
     vkCmdSetDepthTestEnable(cmd, VK_TRUE);
 
     // Same shader for all meshes
@@ -762,6 +820,36 @@ public:
                                       VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                                       VK_IMAGE_LAYOUT_GENERAL,
                                       {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS}});
+
+
+	// Copy eImgVolume into m_outVolumeBuffer
+    nvvk::cmdImageMemoryBarrier(cmd, {m_gBuffers.getColorImage(eImgVolume),
+                                      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                      {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}});
+
+    // Prepare copy region (tightly packed)
+    VkBufferImageCopy copyRegion{};
+    copyRegion.bufferOffset                    = 0;
+    copyRegion.bufferRowLength                 = 0;
+    copyRegion.bufferImageHeight               = 0;
+    copyRegion.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    copyRegion.imageSubresource.mipLevel       = 0;
+    copyRegion.imageSubresource.baseArrayLayer = 0;
+    copyRegion.imageSubresource.layerCount     = 1;
+    copyRegion.imageOffset                     = {0, 0, 0};
+    VkExtent2D size                            = m_gBuffers.getSize();
+    copyRegion.imageExtent                     = {size.width, size.height, 1};
+
+    // Copy image -> buffer
+    vkCmdCopyImageToBuffer(cmd, m_gBuffers.getColorImage(eImgVolume), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           m_outVolumeBuffer.buffer, 1, &copyRegion);
+
+    // Barrier
+    nvvk::cmdImageMemoryBarrier(cmd, {m_gBuffers.getColorImage(eImgVolume),
+                                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                                      VK_IMAGE_LAYOUT_GENERAL,
+                                      {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}});
   }
 
   void onLastHeadlessFrame() override
@@ -1040,7 +1128,7 @@ public:
     VkCommandBuffer cmd = m_app->createTempCmdBuffer();
 
     auto sceneInfo = m_sceneResource.bSceneInfo;
-    auto matrix    = m_sceneResource.sceneInfo.viewInvMatrix;
+    auto matrix    = viewInvMatrix;
 
 	m_aabbCompute.runCompute(cmd, matrix);
     m_app->submitAndWaitTempCmdBuffer(cmd);
@@ -1068,7 +1156,7 @@ public:
       if(minVolume > volume)
       {
         minVolume  = volume;
-        bestMatrix = m_sceneResource.sceneInfo.viewInvMatrix;
+        bestMatrix = viewInvMatrix;
       }
     }
     else
@@ -1077,6 +1165,16 @@ public:
       // First frame doesn't have a reference to a buffer yet
       std::cout << "invalid buffer\n\n";
     }
+  }
+
+  void updateViewMatrixFromCamera()
+  {
+    glm::vec3 defaultForward = {0, 0, -1};
+    glm::vec3 pos            = glm::normalize(m_cameraManip->getEye());
+    glm::vec3 forward        = -pos;
+    glm::quat q              = glm::rotation(defaultForward, forward);
+    viewMatrix				 = glm::mat4_cast(glm::conjugate(q)) * glm::translate(glm::mat4(1.0f), -forward);
+    viewInvMatrix            = glm::inverse(viewMatrix);
   }
 
   void LoadStlData(VkCommandBuffer cmd) {
@@ -1207,7 +1305,9 @@ private:
   // Used to calculate AABB
   std::vector<openstl::Triangle> triangles;
 
-
+  // CPU helper variables
+  shaderio::float4x4 viewMatrix;
+  shaderio::float4x4 viewInvMatrix;
 
 
   // Application and core components
@@ -1251,7 +1351,7 @@ private:
   VkPhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
 
   // Ray tracing toggle
-  bool m_useRayTracing = true;  // Set to true to use ray tracing, false for rasterization
+  bool m_useRayTracing = false;  // Set to true to use ray tracing, false for rasterization
 };
 
 
