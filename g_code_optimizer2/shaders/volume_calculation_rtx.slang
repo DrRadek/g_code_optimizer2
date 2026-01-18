@@ -116,8 +116,8 @@ void rgenMain()
 
   float3 aabbMin = pushConst.aabbMin;
   float3 aabbMax = pushConst.aabbMax;
-  float2 launchIDCorrected = int2(launchID.x, launchSize.y - launchID.y);
-  float2 pixelOffset = pushConst.aabbMin.xy + (pushConst.aabbMax.xy - pushConst.aabbMin.xy) * (launchIDCorrected / launchSize);
+  int2 launchIDCorrected = int2(launchID.x, launchSize.y - launchID.y - 1);
+  float2 pixelOffset = pushConst.aabbMin.xy + (pushConst.aabbMax.xy - pushConst.aabbMin.xy) * ((float2)launchIDCorrected / (float2)(launchSize - 1));
 
   // Set ray tracing flags (0 = no special flags)
   const uint   rayFlags   = 0;
@@ -210,7 +210,7 @@ void rgenMain()
   float maxDist = length(bottomWorld - topWorld);
   float t = saturate((payload.accumDistance) / maxDist); // 0..1
   float gray = 1.0 - t;
-  float3 finalColor = float3(gray, gray, gray);
+  float3 finalColor = float3(1, gray, gray);
 
   outImage[launchID] = float4(finalColor, 1.0);
   outVolume[launchID] = payload.accumDistance;
