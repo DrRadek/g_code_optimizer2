@@ -4,10 +4,10 @@
 
 groupshared float sum[VOLUMESUM_SHADER_WG_SIZE];
 
-layout(push_constant) ConstantBuffer<volume_Params> params;
+[[vk::push_constant]] ConstantBuffer<volume_Params> params;
 
-layout(binding = volumesum_Binding::PartialVolume) StructuredBuffer<float> src;
-layout(binding = volumesum_Binding::OutVolume)    RWStructuredBuffer<float> dst;
+[[vk::binding(volumesum_Binding::PartialVolume)]]    StructuredBuffer<float> src;
+[[vk::binding(volumesum_Binding::OutVolume)]]        RWStructuredBuffer<float> dst;
 
 [shader("compute")]
 [numthreads(VOLUMESUM_SHADER_WG_SIZE, 1, 1)]

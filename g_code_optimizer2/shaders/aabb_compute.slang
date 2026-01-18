@@ -6,11 +6,11 @@
 groupshared float3 sMin[AABB_SHADER_WG_SIZE];
 groupshared float3 sMax[AABB_SHADER_WG_SIZE];
 
-layout(push_constant) ConstantBuffer<aabb_Params> params;
+[[vk::push_constant]] ConstantBuffer<aabb_Params> params;
 
-layout(binding = aabb_Binding::Vertices) StructuredBuffer<float3> vertices;
-layout(binding = aabb_Binding::PartialAabb) RWStructuredBuffer<AABB> partialAabb;
-layout(binding = aabb_Binding::OutAabb) RWStructuredBuffer<AABB> outAabb;
+[[vk::binding(aabb_Binding::Vertices)]]     StructuredBuffer<float3> vertices;
+[[vk::binding(aabb_Binding::PartialAabb)]]  RWStructuredBuffer<AABB> partialAabb;
+[[vk::binding(aabb_Binding::OutAabb)]]      RWStructuredBuffer<AABB> outAabb;
 
 // Called with x WGs
 [shader("compute")]
