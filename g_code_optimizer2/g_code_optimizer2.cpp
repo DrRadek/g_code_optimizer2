@@ -154,26 +154,15 @@ public:
     };
     m_gBuffers.init(gBufferInit);
 
+	auto cmd = m_app->createTempCmdBuffer();
+    resizeBuffers(cmd, m_maxRenderResolution);
+    m_app->submitAndWaitTempCmdBuffer(cmd);
+
     createScene();                        // Create the scene with a teapot and a plane
     createGraphicsDescriptorSetLayout();  // Create the descriptor set layout for the graphics pipeline
     createGraphicsPipelineLayout();       // Create the graphics pipeline layout
     compileAndCreateGraphicsShaders();    // Compile the graphics shaders and create the shader modules
     updateTextures();                     // Update the textures in the descriptor set (if any)
-
-	VkExtent2D   size                   = m_gBuffers.getSize();
-    size_t       elemCount              = size.width * size.height;
-    VkDeviceSize bufferSize             = elemCount * sizeof(float);
-    VkDeviceSize bufferSizeForReduction = m_volumeSumCompute.calculateMaxGroups(elemCount) * sizeof(float);
-    m_outVolumeCount                    = elemCount;
-
-    // create buffer for volume calculations
-    m_allocator.createBuffer(m_outVolumeBuffer, bufferSize == 0 ? 1 : bufferSize,
-                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                             VMA_MEMORY_USAGE_AUTO);
-    NVVK_DBG_NAME(m_outVolumeBuffer.buffer);
-    m_allocator.createBuffer(m_outVolumeBufferForReduction, bufferSizeForReduction == 0 ? 1 : bufferSizeForReduction,
-                             VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO);
-    NVVK_DBG_NAME(m_outVolumeBufferForReduction.buffer);
 
     // Get ray tracing properties
     VkPhysicalDeviceProperties2 prop2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -257,18 +246,6 @@ public:
   {
     namespace PE = nvgui::PropertyEditor;
     // Display the rendering GBuffer in the ImGui window ("Viewport")
-    if(ImGui::Begin("Viewport"))
-    {
-      if(m_useRayTracing)
-      {
-        ImGui::Image(ImTextureID(m_gBuffers.getDescriptorSet(eImgRendered)), ImGui::GetContentRegionAvail());
-	  }
-      else
-      {
-        ImGui::Image(ImTextureID(m_gBuffers.getDescriptorSet(eImgRendered)), ImGui::GetContentRegionAvail());
-      }
-    }
-    ImGui::End();
 
     // Setting panel
     if(ImGui::Begin("Settings"))
@@ -313,10 +290,6 @@ public:
       }
 
       ImGui::Separator();
-      //PE::begin();
-      //PE::SliderFloat2("Metallic/Roughness Override", glm::value_ptr(m_metallicRoughnessOverride), -0.01f, 1.0f, "%.2f",
-      //                 ImGuiSliderFlags_AlwaysClamp, "Override all material metallic and roughness");
-      //PE::end();
       if(ImGui::CollapsingHeader("Other"))
       {
         PE::begin();
@@ -324,7 +297,54 @@ public:
         PE::SliderFloat3("Max aabb", glm::value_ptr(aabbMax), -21.0f, 21.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp, "Override aabb max");
         PE::SliderFloat("volume", &volume, 1e5, 1e8, "%.2f", ImGuiSliderFlags_AlwaysClamp, "volume");
         PE::SliderFloat("min volume", &minVolume, 1e5, 1e8, "%.2f", ImGuiSliderFlags_AlwaysClamp, "min volume");
+
+		bool maxWidthChanged = PE::SliderInt("Max resolution width", &maxResolutionWidth, 1, 4096, "%d", ImGuiSliderFlags_AlwaysClamp, "Max resolution width");
+        bool maxHeightChanged = PE::SliderInt("Max resolution height", &maxResolutionHeight, 1, 4096, "%d", ImGuiSliderFlags_AlwaysClamp, "Max resolution height");
+    bool currentWidthChanged = PE::SliderInt("Current resolution width", &currentResolutionWidth, 1, maxResolutionWidth,
+                                             "%d",
+                        ImGuiSliderFlags_AlwaysClamp, "Current resolution width");
+        bool currentHeightChanged = PE::SliderInt("Current resolution height", &currentResolutionHeight, 1, maxResolutionHeight,
+                                                  "%d",
+                                             ImGuiSliderFlags_AlwaysClamp,
+                      "Current resolution height");
+
+		if(currentResolutionWidth > maxResolutionWidth)
+        {
+          currentResolutionWidth = maxResolutionWidth;
+        }
+        if(currentResolutionHeight > maxResolutionHeight)
+        {
+          currentResolutionHeight = maxResolutionHeight;
+        }
+
+		if(currentWidthChanged || currentHeightChanged)
+        {
+          currentResolutionChanged = true;
+        }
+
+        if(maxWidthChanged || maxHeightChanged)
+        {
+          maxResolutionChanged = true;
+          currentResolutionChanged = true;
+        }
         PE::end();
+      }
+    }
+
+    ImGui::End();
+    if(ImGui::Begin("Viewport"))
+    {
+      ImVec2 scale = {(float)currentResolutionWidth / (float)maxResolutionWidth,
+                      (float)currentResolutionHeight / (float)maxResolutionHeight};
+
+      if(m_useRayTracing)
+      {
+
+        ImGui::Image(ImTextureID(m_gBuffers.getDescriptorSet(eImgRendered)), ImGui::GetContentRegionAvail(), {0, 0}, scale);
+      }
+      else
+      {
+        ImGui::Image(ImTextureID(m_gBuffers.getDescriptorSet(eImgRendered)), ImGui::GetContentRegionAvail(), {0, 0}, scale);
       }
     }
     ImGui::End();
@@ -334,26 +354,38 @@ public:
   // When the viewport is resized, the GBuffer must be resized
   // - Called when the Window "viewport is resized
   void onResize(VkCommandBuffer cmd, const VkExtent2D& size) { 
-      NVVK_CHECK(m_gBuffers.update(cmd, size));
+	  // No longer needed, viewport resolution is unrelated to render resolution
+  }
+
+  void resizeBuffers(VkCommandBuffer cmd, const VkExtent2D& size) {
+    NVVK_CHECK(m_gBuffers.update(cmd, size));
 
     // recreate outVolume buffer to match new size
-    m_allocator.destroyBuffer(m_outVolumeBuffer);
+    if(m_outVolumeBuffer.buffer != VK_NULL_HANDLE)
+    {
+      m_allocator.destroyBuffer(m_outVolumeBuffer);
+    }
+
     size_t       elemCount              = size.width * size.height;
     VkDeviceSize bufferSize             = elemCount * sizeof(float);
     VkDeviceSize bufferSizeForReduction = m_volumeSumCompute.calculateMaxGroups(elemCount) * sizeof(float);
-    m_outVolumeCount                    = elemCount;
 
     m_allocator.createBuffer(m_outVolumeBuffer, bufferSize,
                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                              VMA_MEMORY_USAGE_AUTO);
     NVVK_DBG_NAME(m_outVolumeBuffer.buffer);
 
-    m_allocator.destroyBuffer(m_outVolumeBufferForReduction);
+	if(m_outVolumeBufferForReduction.buffer != VK_NULL_HANDLE)
+    {
+      m_allocator.destroyBuffer(m_outVolumeBufferForReduction);
+    }
     m_allocator.createBuffer(m_outVolumeBufferForReduction, bufferSizeForReduction == 0 ? 1 : bufferSizeForReduction,
                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_AUTO);
     NVVK_DBG_NAME(m_outVolumeBufferForReduction.buffer);
+  }
 
-	updateTextures();
+  void onPreRender() {
+
   }
 
   //---------------------------------------------------------------------------------------------------------------
@@ -367,6 +399,11 @@ public:
 
 	// Calculate volume
 	GetVolumeCalculationResult();
+
+	// TODO: algorithm step here
+
+	// Update resolution to fit the space
+    updateResolution();
 
 	// Update view matrix
 	updateViewMatrixFromCamera();
@@ -556,17 +593,9 @@ public:
 
 
   //--------------------------------------------------------------------------------------------------
-  // Update the volume buffer
   void updateTextures()
   {
-    if(m_outVolumeBuffer.buffer == VK_NULL_HANDLE)
-    {
-      return;
-    }
 
-    /*nvvk::WriteSetContainer write{};
-    write.append(m_descPack.makeWrite(shaderio::BindingPoints::eOutVolume), m_outVolumeBuffer.buffer);
-	vkUpdateDescriptorSets(m_app->getDevice(), write.size(), write.data(), 0, nullptr);*/
   }
 
   // This function is used to compile the Slang shader, and when it fails, it will use the pre-compiled shaders
@@ -691,8 +720,6 @@ public:
   {
     NVVK_DBG_SCOPE(cmd);  // <-- Helps to debug in NSight
 
-	 auto viewportSize = m_app->getViewportSize();
-
     // Push constant information, see usage later
     shaderio::TutoPushConstant pushValues{
         .sceneInfoAddress = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,  // Pass the address of the scene information buffer to the shader
@@ -728,7 +755,7 @@ public:
 
     // Create the rendering info
     VkRenderingInfo renderingInfo      = DEFAULT_VkRenderingInfo;
-    renderingInfo.renderArea           = DEFAULT_VkRect2D(m_gBuffers.getSize());
+    renderingInfo.renderArea           = DEFAULT_VkRect2D(m_currentRenderResolution);
     renderingInfo.colorAttachmentCount = 2;
     renderingInfo.pColorAttachments    = colorAttachments;
     renderingInfo.pDepthAttachment     = &depthAttachment;
@@ -778,7 +805,7 @@ public:
     // All dynamic states are set here
     m_dynamicPipeline.rasterizationState.cullMode = VK_CULL_MODE_NONE;  // Don't cull any triangles (double-sided rendering)
     m_dynamicPipeline.cmdApplyAllStates(cmd);
-    m_dynamicPipeline.cmdSetViewportAndScissor(cmd, viewportSize);
+    m_dynamicPipeline.cmdSetViewportAndScissor(cmd, m_currentRenderResolution);
     vkCmdSetDepthTestEnable(cmd, VK_TRUE);
 
     // Same shader for all meshes
@@ -838,7 +865,7 @@ public:
     copyRegion.imageSubresource.baseArrayLayer = 0;
     copyRegion.imageSubresource.layerCount     = 1;
     copyRegion.imageOffset                     = {0, 0, 0};
-    VkExtent2D size                            = m_gBuffers.getSize();
+    VkExtent2D size                            = m_currentRenderResolution;
     copyRegion.imageExtent                     = {size.width, size.height, 1};
 
     // Copy image -> buffer
@@ -1116,7 +1143,7 @@ public:
 
     // Ray trace
     const nvvk::SBTGenerator::Regions& regions = m_sbtGenerator.getSBTRegions();
-    const VkExtent2D&                  size    = m_app->getViewportSize();
+    const VkExtent2D&                  size    = m_currentRenderResolution;
     vkCmdTraceRaysKHR(cmd, &regions.raygen, &regions.miss, &regions.hit, &regions.callable, size.width, size.height, 1);
 
     // Barrier to make sure the image is ready for Tonemapping
@@ -1141,7 +1168,8 @@ public:
   }
 
   void CalculateVolume(VkCommandBuffer cmd) {
-    m_volumeSumCompute.runCompute(cmd, m_outVolumeCount, &m_outVolumeBuffer, &m_outVolumeBufferForReduction);
+    m_volumeSumCompute.runCompute(cmd, m_currentRenderResolution.width * m_currentRenderResolution.height,
+                                  &m_outVolumeBuffer, &m_outVolumeBufferForReduction);
   }
 
   void GetVolumeCalculationResult() {
@@ -1287,13 +1315,40 @@ public:
     }
   }
 
+  void setMaxResolution(VkExtent2D res) {
+	maxResolutionWidth = res.width;
+    maxResolutionHeight = res.height;
+    maxResolutionChanged = true;
+  }
+
+  void setCurrentResolution(VkExtent2D res) {
+    currentResolutionWidth   = res.width;
+    currentResolutionHeight = res.height;
+    currentResolutionChanged = true;
+  }
+
+  void updateResolution() {
+	if(currentResolutionChanged)
+    {
+      m_currentRenderResolution = {(unsigned int)currentResolutionWidth, (unsigned int)currentResolutionHeight};
+      currentResolutionChanged  = false;
+	}
+   /*if(maxResolutionChanged)
+    {
+      m_maxRenderResolution = {(unsigned int)maxResolutionWidth, (unsigned int)maxResolutionHeight};
+      maxResolutionChanged  = false;
+      auto cmd              = m_app->createTempCmdBuffer();
+      resizeBuffers(cmd, m_maxRenderResolution);
+      m_app->submitAndWaitTempCmdBuffer(cmd);
+    }*/
+  }
+
 private:
   // Other
   // Volume calculation
   nvshaders::VolumeSumCompute m_volumeSumCompute{};
   nvvk::Buffer                m_outVolumeBuffer;              // Buffer for volume calculations
   nvvk::Buffer                m_outVolumeBufferForReduction;  // Buffer for volume reduction
-  int                         m_outVolumeCount = 0;
   float                       volume    = 0;
   float                       minVolume = std::numeric_limits<float>().max();
   shaderio::float4x4          bestMatrix;  // Used to save the result
@@ -1308,6 +1363,16 @@ private:
   // CPU helper variables
   shaderio::float4x4 viewMatrix;
   shaderio::float4x4 viewInvMatrix;
+
+  //
+  int        maxResolutionWidth      = 4096;
+  int        maxResolutionHeight     = 4096;
+  int        currentResolutionWidth = 1024;
+  int        currentResolutionHeight = 1024;
+  VkExtent2D m_maxRenderResolution{(unsigned int)maxResolutionWidth, (unsigned int)maxResolutionHeight};
+  VkExtent2D m_currentRenderResolution{(unsigned int)currentResolutionWidth, (unsigned int)currentResolutionHeight};
+  bool       maxResolutionChanged = false;
+  bool       currentResolutionChanged = false;
 
 
   // Application and core components
@@ -1373,6 +1438,9 @@ int main(int argc, char** argv)
   reg.add({"outputquatfile", "STL file to optimize"}, &inputs.outputQuatFilePath);
   cli.add(reg);
   cli.parse(argc, argv);
+
+  inputs.stlFilePath = "D:\\skola\\VU\\g_code_optimizer_release\\3DBenchy2\\3DBenchy2.stl";
+
 
   // Setting up the Vulkan context, instance and device extensions
   VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT};
