@@ -67,6 +67,10 @@
 #include "aabb_compute.hpp"
 #include "_autogen/aabb_compute.slang.h"
 
+// Volume integration
+#include "volume_integrate_compute.hpp"
+#include "_autogen/volume_integrate.slang.h"
+
 // Volume calculation
 #include "volumesum_compute.hpp"
 #include "_autogen/volumesum_compute.slang.h"
@@ -185,6 +189,7 @@ public:
     createRayTracingPipeline();        // Create pipeline structure and SBT
 
 	m_aabbCompute.cleanupAfterInit(&m_allocator);
+    m_volumeIntegrateCompute.init(&m_allocator, volume_integrate_slang);
     m_volumeSumCompute.init(&m_allocator, volumesum_compute_slang);
   }
 
@@ -223,6 +228,7 @@ public:
     m_gBuffers.deinit();
     m_stagingUploader.deinit();
     m_aabbCompute.deinit();
+    m_volumeIntegrateCompute.deinit();
     m_volumeSumCompute.deinit();
     m_samplerPool.deinit();
 
@@ -422,6 +428,8 @@ public:
     {
       rasterScene(cmd);
     }
+
+	IntegrateVolume(cmd);
 
 	CalculateVolume(cmd);
 
@@ -834,40 +842,15 @@ public:
 
     // ** END RENDERING **
     vkCmdEndRendering(cmd);
+	// Barriers
     nvvk::cmdImageMemoryBarrier(cmd, {m_gBuffers.getColorImage(eImgRendered), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                       VK_IMAGE_LAYOUT_GENERAL});
     nvvk::cmdImageMemoryBarrier(cmd, {m_gBuffers.getDepthImage(),
                                       VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                                       VK_IMAGE_LAYOUT_GENERAL,
                                       {VK_IMAGE_ASPECT_DEPTH_BIT, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS}});
-
-
-	// Copy eImgVolume into m_outVolumeBuffer
     nvvk::cmdImageMemoryBarrier(cmd, {m_gBuffers.getColorImage(eImgVolume),
                                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                                      {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}});
-
-    // Prepare copy region (tightly packed)
-    VkBufferImageCopy copyRegion{};
-    copyRegion.bufferOffset                    = 0;
-    copyRegion.bufferRowLength                 = 0;
-    copyRegion.bufferImageHeight               = 0;
-    copyRegion.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-    copyRegion.imageSubresource.mipLevel       = 0;
-    copyRegion.imageSubresource.baseArrayLayer = 0;
-    copyRegion.imageSubresource.layerCount     = 1;
-    copyRegion.imageOffset                     = {0, 0, 0};
-    VkExtent2D size                            = m_currentRenderResolution;
-    copyRegion.imageExtent                     = {size.width, size.height, 1};
-
-    // Copy image -> buffer
-    vkCmdCopyImageToBuffer(cmd, m_gBuffers.getColorImage(eImgVolume), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                           m_outVolumeBuffer.buffer, 1, &copyRegion);
-
-    // Barrier
-    nvvk::cmdImageMemoryBarrier(cmd, {m_gBuffers.getColorImage(eImgVolume),
-                                      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                       VK_IMAGE_LAYOUT_GENERAL,
                                       {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}});
   }
@@ -1140,26 +1123,8 @@ public:
     const VkExtent2D&                  size    = m_currentRenderResolution;
     vkCmdTraceRaysKHR(cmd, &regions.raygen, &regions.miss, &regions.hit, &regions.callable, size.width, size.height, 1);
 
-    // Barrier to make sure the image is ready
+    // Barriers
     nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
-
-	// Prepare copy region (tightly packed)
-    VkBufferImageCopy copyRegion{};
-    copyRegion.bufferOffset                    = 0;
-    copyRegion.bufferRowLength                 = 0;
-    copyRegion.bufferImageHeight               = 0;
-    copyRegion.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-    copyRegion.imageSubresource.mipLevel       = 0;
-    copyRegion.imageSubresource.baseArrayLayer = 0;
-    copyRegion.imageSubresource.layerCount     = 1;
-    copyRegion.imageOffset                     = {0, 0, 0};
-    copyRegion.imageExtent                     = {size.width, size.height, 1};
-
-    // Copy image -> buffer
-    vkCmdCopyImageToBuffer(cmd, m_gBuffers.getColorImage(eImgVolume), VK_IMAGE_LAYOUT_GENERAL,
-                           m_outVolumeBuffer.buffer, 1, &copyRegion);
-
-    // Barrier
     nvvk::cmdImageMemoryBarrier(cmd, {m_gBuffers.getColorImage(eImgVolume),
                                       VK_IMAGE_LAYOUT_GENERAL,
                                       VK_IMAGE_LAYOUT_GENERAL,
@@ -1183,8 +1148,25 @@ public:
 	aabbMax.z += glm::max(aabbMax.z * 0.00001f, 0.001f);  // Add small epsilon
   }
 
+  void IntegrateVolume(VkCommandBuffer cmd) {
+	// (n) * (m) => (n-1) * (m-1)
+    m_volumeIntegrateCompute.runCompute(
+		cmd,
+		m_gBuffers.getColorImageView(eImgVolume),
+		&m_outVolumeBuffer,
+        {
+			m_currentRenderResolution.width,
+			m_currentRenderResolution.height},
+        { // size of one integrated area
+			(aabbMax.x - aabbMin.x) / (float)(m_currentRenderResolution.width - 1),
+            (aabbMax.y - aabbMin.y) / (float)(m_currentRenderResolution.height - 1)
+		}
+	);
+  }
+
   void CalculateVolume(VkCommandBuffer cmd) {
-    m_volumeSumCompute.runCompute(cmd, m_currentRenderResolution.width * m_currentRenderResolution.height,
+	// (n-1) * (m-1) => 1
+    m_volumeSumCompute.runCompute(cmd, (m_currentRenderResolution.width -1) * (m_currentRenderResolution.height - 1),
                                   &m_outVolumeBuffer, &m_outVolumeBufferForReduction);
   }
 
@@ -1361,6 +1343,8 @@ public:
 
 private:
   // Other
+  // Volume integration
+  nvshaders::VolumeIntegrateCompute m_volumeIntegrateCompute{};
   // Volume calculation
   nvshaders::VolumeSumCompute m_volumeSumCompute{};
   nvvk::Buffer                m_outVolumeBuffer;              // Buffer for volume calculations
@@ -1454,9 +1438,6 @@ int main(int argc, char** argv)
   reg.add({"outputquatfile", "STL file to optimize"}, &inputs.outputQuatFilePath);
   cli.add(reg);
   cli.parse(argc, argv);
-
-  inputs.stlFilePath = "";
-
 
   // Setting up the Vulkan context, instance and device extensions
   VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT};

@@ -80,8 +80,8 @@ struct aabb_Params
 
 enum volumesum_Binding
 {
-  PartialVolume = 1,
-  OutVolume     = 2
+  PartialVolume = 0,
+  OutVolume     = 1
 };
 
 struct volume_Params
@@ -90,6 +90,18 @@ struct volume_Params
   uint groupSize;
 };
 
+// Integration
+#define VOLUME_INTEGRATE_SHADER_WG_SIZE 16
 
+enum volume_integrate_Binding
+{
+  vInImage = 0,
+  vOutVolume = 1
+};
+
+struct VolumeIntegratePushConstant{
+  uint2 image_size;
+  float2 area_size;
+};
 
 NAMESPACE_SHADERIO_END()
