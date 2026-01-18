@@ -34,7 +34,7 @@
 // Output image where the final rendered result will be stored
 [[vk::binding(BindingPoints::eOutImage, 1)]]    RWTexture2D<float4> outImage;
 // Output volume array
-[[vk::binding(BindingPoints::eOutVolume, 1)]]   RWStructuredBuffer<float> outVolume;
+[[vk::binding(BindingPoints::eOutVolume, 1)]]   RWTexture2D<float> outVolume;
 // clang-format on
 
 
@@ -213,7 +213,7 @@ void rgenMain()
   float3 finalColor = float3(gray, gray, gray);
 
   outImage[launchID] = float4(finalColor, 1.0);
-  outVolume[launchID.x + launchID.y * launchSize.x] = payload.accumDistance;
+  outVolume[launchID] = payload.accumDistance;
 }
 
 //-----------------------------------------------------------------------

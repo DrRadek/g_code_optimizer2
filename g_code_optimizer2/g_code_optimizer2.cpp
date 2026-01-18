@@ -553,13 +553,6 @@ public:
                          .stageFlags      = VK_SHADER_STAGE_ALL},
                         VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
                             | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
-    bindings.addBinding({.binding         = shaderio::BindingPoints::eOutVolume,
-                         .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                         .descriptorCount = 1,
-                         .stageFlags      = VK_SHADER_STAGE_ALL},
-                        VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_UNUSED_WHILE_PENDING_BIT
-                            | VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT);
-    // Creating the descriptor set and set layout from the bindings
     m_descPack.init(bindings, m_app->getDevice(), 1, VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
                     VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT | VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT);
 
@@ -982,7 +975,7 @@ public:
                          .descriptorCount = 1,
                          .stageFlags      = VK_SHADER_STAGE_ALL});
     bindings.addBinding({.binding         = shaderio::BindingPoints::eOutVolume,
-                         .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                         .descriptorType  = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,
                          .descriptorCount = 1,
                          .stageFlags      = VK_SHADER_STAGE_ALL});
 
@@ -1125,7 +1118,8 @@ public:
     write.append(m_rtDescPack.makeWrite(shaderio::BindingPoints::eOutImage), m_gBuffers.getColorImageView(eImgRendered),
                  VK_IMAGE_LAYOUT_GENERAL);
     // Add volume buffer
-    write.append(m_rtDescPack.makeWrite(shaderio::BindingPoints::eOutVolume), m_outVolumeBuffer.buffer);
+    write.append(m_rtDescPack.makeWrite(shaderio::BindingPoints::eOutVolume), m_gBuffers.getColorImageView(eImgVolume),
+                 VK_IMAGE_LAYOUT_GENERAL);
     vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_rtPipelineLayout, 1, write.size(), write.data());
 
     // Push constant information
@@ -1146,8 +1140,30 @@ public:
     const VkExtent2D&                  size    = m_currentRenderResolution;
     vkCmdTraceRaysKHR(cmd, &regions.raygen, &regions.miss, &regions.hit, &regions.callable, size.width, size.height, 1);
 
-    // Barrier to make sure the image is ready for Tonemapping
+    // Barrier to make sure the image is ready
     nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+
+	// Prepare copy region (tightly packed)
+    VkBufferImageCopy copyRegion{};
+    copyRegion.bufferOffset                    = 0;
+    copyRegion.bufferRowLength                 = 0;
+    copyRegion.bufferImageHeight               = 0;
+    copyRegion.imageSubresource.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+    copyRegion.imageSubresource.mipLevel       = 0;
+    copyRegion.imageSubresource.baseArrayLayer = 0;
+    copyRegion.imageSubresource.layerCount     = 1;
+    copyRegion.imageOffset                     = {0, 0, 0};
+    copyRegion.imageExtent                     = {size.width, size.height, 1};
+
+    // Copy image -> buffer
+    vkCmdCopyImageToBuffer(cmd, m_gBuffers.getColorImage(eImgVolume), VK_IMAGE_LAYOUT_GENERAL,
+                           m_outVolumeBuffer.buffer, 1, &copyRegion);
+
+    // Barrier
+    nvvk::cmdImageMemoryBarrier(cmd, {m_gBuffers.getColorImage(eImgVolume),
+                                      VK_IMAGE_LAYOUT_GENERAL,
+                                      VK_IMAGE_LAYOUT_GENERAL,
+                                      {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}});
   }
 
   // Recalculate AABB (GPU implementation)
@@ -1439,7 +1455,7 @@ int main(int argc, char** argv)
   cli.add(reg);
   cli.parse(argc, argv);
 
-  inputs.stlFilePath = "D:\\skola\\VU\\g_code_optimizer_release\\3DBenchy2\\3DBenchy2.stl";
+  inputs.stlFilePath = "";
 
 
   // Setting up the Vulkan context, instance and device extensions
