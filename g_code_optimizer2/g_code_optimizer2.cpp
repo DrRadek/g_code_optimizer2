@@ -75,6 +75,9 @@
 #include "volumesum_compute.hpp"
 #include "_autogen/volumesum_compute.slang.h"
 
+// Camera
+#include "custom_camera.hpp"
+
 #include <glm/gtx/quaternion.hpp>
 //---------------------------------------------------------------------------------------
 // Ray Tracing Tutorial
@@ -168,25 +171,27 @@ public:
     compileAndCreateGraphicsShaders();    // Compile the graphics shaders and create the shader modules
     updateTextures();                     // Update the textures in the descriptor set (if any)
 
-    // Get ray tracing properties
-    VkPhysicalDeviceProperties2 prop2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
-    prop2.pNext = &m_rtProperties;
-    vkGetPhysicalDeviceProperties2(m_app->getPhysicalDevice(), &prop2);
+	if(hasRtx)
+    {
+		// Get ray tracing properties
+		VkPhysicalDeviceProperties2 prop2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+		prop2.pNext = &m_rtProperties;
+		vkGetPhysicalDeviceProperties2(m_app->getPhysicalDevice(), &prop2);
 
-    // Initialize acceleration structure builder
-    m_asBuilder.init(&m_allocator, &m_stagingUploader, m_app->getQueue(0));
+		// Initialize acceleration structure builder
+		m_asBuilder.init(&m_allocator, &m_stagingUploader, m_app->getQueue(0));
 
-    // Initialize SBT generator
-    m_sbtGenerator.init(m_app->getDevice(), m_rtProperties);
+		// Initialize SBT generator
+		m_sbtGenerator.init(m_app->getDevice(), m_rtProperties);
 
+      // Set up acceleration structure infrastructure
+      createBottomLevelAS();  // Set up BLAS infrastructure
+      createTopLevelAS();     // Set up TLAS infrastructure
 
-    // Set up acceleration structure infrastructure
-    createBottomLevelAS();  // Set up BLAS infrastructure
-    createTopLevelAS();     // Set up TLAS infrastructure
-
-    // Set up ray tracing pipeline infrastructure
-    createRaytraceDescriptorLayout();  // Create descriptor layout
-    createRayTracingPipeline();        // Create pipeline structure and SBT
+      // Set up ray tracing pipeline infrastructure
+      createRaytraceDescriptorLayout();  // Create descriptor layout
+      createRayTracingPipeline();        // Create pipeline structure and SBT
+    }
 
 	m_aabbCompute.cleanupAfterInit(&m_allocator);
     m_volumeIntegrateCompute.init(&m_allocator, volume_integrate_slang);
@@ -257,10 +262,9 @@ public:
     if(ImGui::Begin("Settings"))
     {
       // Ray tracing toggle
-      ImGui::Checkbox("Use Ray Tracing", &m_useRayTracing);
+      if (hasRtx)
+		ImGui::Checkbox("Use Ray Tracing", &m_useRayTracing);
 
-      if(ImGui::CollapsingHeader("Camera"))
-        nvgui::CameraWidget(m_cameraManip);
       if(ImGui::CollapsingHeader("Environment"))
       {
 		PE::begin();
@@ -313,6 +317,8 @@ public:
                                                   "%d",
                                              ImGuiSliderFlags_AlwaysClamp,
                       "Current resolution height");
+		PE::SliderFloat("area resolution", &areaResolution,0.001f, 1, "%.2f", ImGuiSliderFlags_AlwaysClamp, "area resolution");
+        PE::Checkbox("Use fixed area resolution", &useFixedAreaResolution, "Use fixed area resolution");
 
 		if(currentResolutionWidth > maxResolutionWidth)
         {
@@ -408,19 +414,19 @@ public:
 
 	// TODO: algorithm step here
 
-	// Update resolution to fit the space
-    updateResolution();
-
 	// Update view matrix
 	updateViewMatrixFromCamera();
 
 	// Recalculate AABB
     RecalculateAABB();
 
+	// Update resolution to fit the space
+    updateResolution();
+
     // Update the scene information buffer, this cannot be done in between dynamic rendering
     updateSceneBuffer(cmd);
 
-    if(m_useRayTracing)
+    if(m_useRayTracing && hasRtx)
     {
       raytraceScene(cmd);
     }
@@ -462,7 +468,7 @@ public:
     {
       vkQueueWaitIdle(m_app->getQueue(0).queue);
 
-      if(m_useRayTracing)
+      if(m_useRayTracing && hasRtx)
       {
         createRayTracingPipeline();
       }
@@ -542,10 +548,6 @@ public:
     sceneInfo.punctualLights[0].coneAngle = 0.9f;  // Cone angle for spot lights (0 for point and directional lights)
 
     m_app->submitAndWaitTempCmdBuffer(cmd);  // Submit the command buffer to upload the resources
-
-    // Default camera
-    m_cameraManip->setClipPlanes({0.00F, 100.0F});
-    m_cameraManip->setLookat({0.0F, 0.5F, 50.0}, {0.F, 0.F, 0.F}, {0.0F, 1.0F, 0.0F});
   }
 
 
@@ -696,7 +698,7 @@ public:
     m_sceneResource.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;   // Combine the view and projection matrices
     m_sceneResource.sceneInfo.projInvMatrix  = glm::inverse(projMatrix);  // Inverse projection matrix
     m_sceneResource.sceneInfo.viewInvMatrix  = viewInvMatrix;  // Inverse view matrix
-    m_sceneResource.sceneInfo.cameraPosition = m_cameraManip->getEye();   // Get the camera position
+    m_sceneResource.sceneInfo.cameraPosition = {0, 0, 0}; // Get the camera position 
     m_sceneResource.sceneInfo.instances = (shaderio::GltfInstance*)m_sceneResource.bInstances.address;  // Get the address of the instance buffer
     m_sceneResource.sceneInfo.meshes = (shaderio::GltfMesh*)m_sceneResource.bMeshes.address;  // Get the address of the mesh buffer
     m_sceneResource.sceneInfo.materials = (shaderio::GltfMetallicRoughness*)m_sceneResource.bMaterials.address;  // Get the address of the material buffer
@@ -704,12 +706,12 @@ public:
     // Making sure the scene information buffer is updated before rendering
     // Wait that the fragment and raytracing shader is done reading the previous scene information and wait for the transfer to complete
     nvvk::cmdBufferMemoryBarrier(cmd, {m_sceneResource.bSceneInfo.buffer,
-                                       m_useRayTracing ? VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR :
+                                       (m_useRayTracing && hasRtx) ? VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR :
 														 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                                        VK_PIPELINE_STAGE_2_TRANSFER_BIT});
     vkCmdUpdateBuffer(cmd, m_sceneResource.bSceneInfo.buffer, 0, sizeof(shaderio::GltfSceneInfo), &m_sceneResource.sceneInfo);
     nvvk::cmdBufferMemoryBarrier(cmd, {m_sceneResource.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                                       m_useRayTracing ? VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR :
+                                       (m_useRayTracing & hasRtx) ? VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR :
                                                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT});
   }
 
@@ -859,9 +861,6 @@ public:
   {
 
   }
-
-  // Accessor for camera manipulator
-  std::shared_ptr<nvutils::CameraManipulator> getCameraManipulator() const { return m_cameraManip; }
 
   //--------------------------------------------------------------------------------------------------
   // Converting a PrimitiveMesh as input for BLAS
@@ -1149,6 +1148,9 @@ public:
   }
 
   void IntegrateVolume(VkCommandBuffer cmd) {
+    float width = aabbMax.x - aabbMin.x;
+    float height = aabbMax.y - aabbMin.y;
+
 	// (n) * (m) => (n-1) * (m-1)
     m_volumeIntegrateCompute.runCompute(
 		cmd,
@@ -1158,8 +1160,8 @@ public:
 			m_currentRenderResolution.width,
 			m_currentRenderResolution.height},
         { // size of one integrated area
-			(aabbMax.x - aabbMin.x) / (float)(m_currentRenderResolution.width - 1),
-            (aabbMax.y - aabbMin.y) / (float)(m_currentRenderResolution.height - 1)
+			(width) / (float)(m_currentRenderResolution.width - 1),
+            (height) / (float)(m_currentRenderResolution.height - 1)
 		}
 	);
   }
@@ -1193,14 +1195,11 @@ public:
     }
   }
 
-  void updateViewMatrixFromCamera()
+ void updateViewMatrixFromCamera()
   {
-    glm::vec3 defaultForward = {0, 0, -1};
-    glm::vec3 pos            = glm::normalize(m_cameraManip->getEye());
-    glm::vec3 forward        = -pos;
-    glm::quat q              = glm::rotation(defaultForward, forward);
-    viewMatrix				 = glm::mat4_cast(glm::conjugate(q)) * glm::translate(glm::mat4(1.0f), -forward);
-    viewInvMatrix            = glm::inverse(viewMatrix);
+    viewMatrix = m_camera->getViewMatrix();
+    // std::cout << m_camera->getRoll() << "\n";
+    viewInvMatrix = glm::inverse(viewMatrix);
   }
 
   void LoadStlData(VkCommandBuffer cmd) {
@@ -1326,7 +1325,30 @@ public:
   }
 
   void updateResolution() {
-	if(currentResolutionChanged)
+    float width  = aabbMax.x - aabbMin.x;
+    float height = aabbMax.y - aabbMin.y;
+    // dynamically calculate n, m to keep fixed area size
+    if(useFixedAreaResolution)
+    {
+      currentResolutionWidth  = round(width / areaResolution);
+      currentResolutionHeight = round(height / areaResolution);
+
+      if(currentResolutionWidth > m_maxRenderResolution.width)
+      {
+        std::cout << " Warning: width " << currentResolutionWidth
+                  << " is larger than max width: " << m_maxRenderResolution.width;
+        currentResolutionWidth = m_maxRenderResolution.width;
+      }
+
+      if(currentResolutionHeight > m_maxRenderResolution.height)
+      {
+        std::cout << " Warning: height " << currentResolutionHeight
+                  << " is larger than max height: " << m_maxRenderResolution.height;
+        currentResolutionHeight = m_maxRenderResolution.height;
+      }
+    }
+
+	if(currentResolutionChanged || useFixedAreaResolution)
     {
       m_currentRenderResolution = {(unsigned int)currentResolutionWidth, (unsigned int)currentResolutionHeight};
       currentResolutionChanged  = false;
@@ -1341,8 +1363,14 @@ public:
     }*/
   }
 
+  // Camera
+  std::shared_ptr<nvapp::CustomCamera> m_camera{};
+  bool                                 hasRtx = false;
 private:
   // Other
+  bool useFixedAreaResolution = false; // fixed width x height
+  float areaResolution         = 0; // used to calculate width x height 
+  
   // Volume integration
   nvshaders::VolumeIntegrateCompute m_volumeIntegrateCompute{};
   // Volume calculation
@@ -1384,7 +1412,7 @@ private:
   nvslang::SlangCompiler m_slangCompiler{};    // The Slang compiler used to compile the shaders
 
   // Camera manipulator
-  std::shared_ptr<nvutils::CameraManipulator> m_cameraManip{std::make_shared<nvutils::CameraManipulator>()};
+  //std::shared_ptr<nvutils::CameraManipulator> m_cameraManip{std::make_shared<nvutils::CameraManipulator>()};
 
   // Pipeline
   nvvk::GraphicsPipelineState m_dynamicPipeline;  // The dynamic pipeline state used to set the graphics pipeline state, like viewport, scissor, and depth test
@@ -1452,10 +1480,27 @@ int main(int argc, char** argv)
           {
               {VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME},
               {VK_EXT_SHADER_OBJECT_EXTENSION_NAME, &shaderObjectFeatures},
-              {VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accelFeature},     // Build acceleration structures
-              {VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rtPipelineFeature},  // Use vkCmdTraceRaysKHR
-              {VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME},                  // Required by ray tracing pipeline
           },
+      .postSelectPhysicalDeviceCallback = [](VkInstance instance, VkPhysicalDevice phys, nvvk::ContextInitInfo& ci) -> bool {
+        std::vector<VkExtensionProperties> extProps;
+        nvvk::Context::getDeviceExtensions(phys, extProps);
+        auto hasExt = [&](const char* name) {
+          return std::any_of(extProps.begin(), extProps.end(),
+                             [&](const VkExtensionProperties& p) { return strcmp(p.extensionName, name) == 0; });
+        };
+
+        if(hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) && hasExt(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)
+           && hasExt(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME))
+        {
+          static VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
+          static VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
+          // chain feature structs if you need to enable specific feature bits via pNext
+          ci.deviceExtensions.push_back({VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accel});	// Build acceleration structures
+          ci.deviceExtensions.push_back({VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rt});			// Use vkCmdTraceRaysKHR
+          ci.deviceExtensions.push_back({VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME});			// Required by ray tracing pipeline
+        }
+        return true;  // continue with device creation
+      }
   };
   if(!appInfo.headless)
   {
@@ -1498,16 +1543,20 @@ int main(int argc, char** argv)
 
   // Elements added to the application
   auto tutorial   = std::make_shared<GCodeOptimizer2>(inputs);               // Our tutorial element
-  auto elemCamera = std::make_shared<nvapp::ElementCamera>();  // Element to control the camera movement
+  //auto elemCamera = std::make_shared<nvapp::ElementCamera>();  // Element to control the camera movement
   auto windowTitle = std::make_shared<nvapp::ElementDefaultWindowTitle>();  // Element displaying the window title with application name and size
   auto windowMenu = std::make_shared<nvapp::ElementDefaultMenu>();  // Element displaying a menu, File->Exit ...
-  auto camManip   = tutorial->getCameraManipulator();
-  elemCamera->setCameraManipulator(camManip);
+  //auto camManip   = tutorial->getCameraManipulator();
+  //elemCamera->setCameraManipulator(camManip);
+  auto customCamera = std::make_shared<nvapp::CustomCamera>();
+  tutorial->m_camera = customCamera;
+  tutorial->hasRtx   = vkContext.hasExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
 
   // Adding all elements
   application.addElement(windowMenu);
   application.addElement(windowTitle);
-  application.addElement(elemCamera);
+  //application.addElement(elemCamera);
+  application.addElement(customCamera);
   application.addElement(tutorial);
 
   application.run();     // Start the application, loop until the window is closed

@@ -144,7 +144,6 @@ void rgenMain()
 
 
   // Accumulator and counters
-  float accumDistance = 0.0;
   int   hitCount = 0;
 
   // Starting origin slightly offset from top to avoid immediate self-intersection
@@ -185,12 +184,6 @@ void rgenMain()
 
     // Distance between this hit and the previous hit position
     float   d = length(hitPos - prevHitPos);
-
-    // Skip accumulating for hitCount == 0, then for subsequent hits, accumulate only when hitCount is odd
-    if(hitCount > 0 && (hitCount % 2) == 0)
-    {
-      accumDistance += d;
-    }
 
     // Move origin just past the hit point to continue tracing towards bottom
     float3 newOrigin = hitPos + worldDir * 0.001;
