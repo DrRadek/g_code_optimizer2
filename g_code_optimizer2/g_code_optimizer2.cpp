@@ -78,6 +78,9 @@
 // Camera
 #include "custom_camera.hpp"
 
+// Algorithms
+#include "Algorithms/AlgorithmSync.hpp"
+
 #include <glm/gtx/quaternion.hpp>
 //---------------------------------------------------------------------------------------
 // Ray Tracing Tutorial
@@ -196,6 +199,25 @@ public:
 	m_aabbCompute.cleanupAfterInit(&m_allocator);
     m_volumeIntegrateCompute.init(&m_allocator, volume_integrate_slang);
     m_volumeSumCompute.init(&m_allocator, volumesum_compute_slang);
+
+	// Calculate limits
+    {
+      updateViewMatrixFromCamera();
+      RecalculateAABB();
+      maxSupportHeight  = glm::distance(aabbMin, aabbMax);
+      maxAreaResolution = maxSupportHeight / (float)maxResolutionHeight;
+
+      std::cout << "max support height: " << maxSupportHeight << "\n";
+      std::cout << "max area resolution: " << maxAreaResolution << "\n";
+
+      if(areaResolution > maxAreaResolution)
+      {
+        std::string error = "Error: area resolution is too big to fit in texture. Maximum resolution is "
+                            + std::to_string(maxAreaResolution) + "\n";
+        std::cout << error;
+        throw std::runtime_error(error);
+      }
+    }
   }
 
   //-------------------------------------------------------------------------------
@@ -412,7 +434,8 @@ public:
 	// Calculate volume
 	GetVolumeCalculationResult();
 
-	// TODO: algorithm step here
+	// Algorithm synchronization
+	RunAlgorithm();
 
 	// Update view matrix
 	updateViewMatrixFromCamera();
@@ -489,29 +512,8 @@ public:
 
     VkCommandBuffer cmd = m_app->createTempCmdBuffer();
 
-    // Load the GLTF resources
+    // Load the resources
     {
-      tinygltf::Model teapotModel =
-          nvsamples::loadGltfResources(nvutils::findFile("teapot.gltf", nvsamples::getResourcesDirs()));  // Load the GLTF resources from the file
-
-      tinygltf::Model planeModel =
-          nvsamples::loadGltfResources(nvutils::findFile("plane.gltf", nvsamples::getResourcesDirs()));  // Load the GLTF resources from the file
-
-      // Textures
-      {
-        std::filesystem::path imageFilename = nvutils::findFile("tiled_floor.png", nvsamples::getResourcesDirs());
-        nvvk::Image texture = nvsamples::loadAndCreateImage(cmd, m_stagingUploader, m_app->getDevice(), imageFilename);  // Load the image from the file and create a texture from it
-        NVVK_DBG_NAME(texture.image);
-        m_samplerPool.acquireSampler(texture.descriptor.sampler);
-        m_textures.emplace_back(texture);  // Store the texture in the vector of textures
-      }
-
-      // Upload the GLTF resources to the GPU
-      {
-        //nvsamples::importGltfData(m_sceneResource, teapotModel, m_stagingUploader);  // Import the GLTF resources
-        //nvsamples::importGltfData(m_sceneResource, planeModel, m_stagingUploader);   // Import the GLTF resources
-      }
-
       LoadStlData(cmd);
     }
 
@@ -693,7 +695,12 @@ public:
   {
     NVVK_DBG_SCOPE(cmd);  // <-- Helps to debug in NSight
 
-	glm::mat4 projMatrix = glm::orthoRH_ZO(aabbMin.x, aabbMax.x, aabbMax.y, aabbMin.y, -aabbMax.z - 1, -aabbMin.z - 1);
+	float     width      = aabbMax.x - aabbMin.x;
+    float     height     = aabbMax.y - aabbMin.y;
+    float     halfStepX  = 0.5f * width / float(m_currentRenderResolution.width - 1);
+    float     halfStepY  = 0.5f * height / float(m_currentRenderResolution.height - 1);
+    glm::mat4 projMatrix = glm::orthoRH_ZO(aabbMin.x - halfStepX, aabbMax.x + halfStepX, aabbMax.y + halfStepY,
+                                           aabbMin.y - halfStepY, -aabbMax.z - 1, -aabbMin.z - 1);
 
     m_sceneResource.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;   // Combine the view and projection matrices
     m_sceneResource.sceneInfo.projInvMatrix  = glm::inverse(projMatrix);  // Inverse projection matrix
@@ -727,7 +734,8 @@ public:
     shaderio::TutoPushConstant pushValues{
         .sceneInfoAddress = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,  // Pass the address of the scene information buffer to the shader
         .aabbMin = aabbMin,
-		.aabbMax = aabbMax
+		.aabbMax = aabbMax,
+        .maxSupportHeight = maxSupportHeight
     };
     const VkPushConstantsInfo pushInfo{
         .sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
@@ -750,7 +758,7 @@ public:
 	// Volume
     colorAttachments[1].loadOp                  = VK_ATTACHMENT_LOAD_OP_CLEAR;
 	colorAttachments[1].imageView               = m_gBuffers.getColorImageView(eImgVolume);
-    colorAttachments[1].clearValue              = {.color = {1.0f, 1.0f, 1.0f, 1.0f}};
+    colorAttachments[1].clearValue              = {.color = {0.0f}};
 
     VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
     depthAttachment.imageView                 = m_gBuffers.getDepthImageView();
@@ -1108,7 +1116,8 @@ public:
     shaderio::RtxPushConstant pushValues{
         .sceneInfoAddress          = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,
 		.aabbMin = aabbMin, 
-		.aabbMax = aabbMax
+		.aabbMax = aabbMax,
+		.maxSupportHeight = maxSupportHeight
     };
     const VkPushConstantsInfo pushInfo{.sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
                                        .layout     = m_rtPipelineLayout,
@@ -1148,8 +1157,8 @@ public:
   }
 
   void IntegrateVolume(VkCommandBuffer cmd) {
-    float width = aabbMax.x - aabbMin.x;
-    float height = aabbMax.y - aabbMin.y;
+    float width = (aabbMax.x - aabbMin.x);
+    float height = (aabbMax.y - aabbMin.y);
 
 	// (n) * (m) => (n-1) * (m-1)
     m_volumeIntegrateCompute.runCompute(
@@ -1157,7 +1166,7 @@ public:
 		m_gBuffers.getColorImageView(eImgVolume),
 		&m_outVolumeBuffer,
         {
-			m_currentRenderResolution.width,
+			(m_currentRenderResolution.width),
 			m_currentRenderResolution.height},
         { // size of one integrated area
 			(width) / (float)(m_currentRenderResolution.width - 1),
@@ -1184,7 +1193,7 @@ public:
       if(minVolume > volume)
       {
         minVolume  = volume;
-        bestMatrix = viewInvMatrix;
+        bestRotation = viewInvMatrix;
       }
     }
     else
@@ -1195,8 +1204,78 @@ public:
     }
   }
 
+  void RunAlgorithm() {
+    float result;
+
+	std::cout << m_algo->isAlgorithmRunning() << "\n";
+    if(m_algo->isAlgorithmRunning())
+    {
+		// notify algorithm about the result
+		m_algo->notifyAlgorithm(volume, m_camera->getRotation());
+
+		// Read another request
+		HandleAlgorithmWait();
+	}
+    else
+    {
+      std::cout << "algo not running\n";
+      if(startAlgorithm)
+      {
+
+		// Request to start the algorithm
+        m_algo->startAlgorithm();
+		m_camera->disableInteractive();
+        startAlgorithm = false;
+
+        HandleAlgorithmWait();
+	  }
+	}
+  }
+
+  void HandleAlgorithmWait() {
+    auto syncData = m_algo->waitForAlgorithm();
+
+	if(syncData.state == AlgorithmState::done)
+	{
+	  m_camera->setRotation(syncData.resultRotation);
+      m_algo->stopAlgorithm();
+
+      setPosition = false;
+      movePosition = false;
+
+	  if(initiatedByAlgorithm)
+      {
+		// TODO: stop
+	  }
+      else
+      {
+        m_camera->enableInteractive();
+	  }
+
+	}
+    else
+    {
+      moveDirection = syncData.moveDirection;
+      newPosition   = syncData.newPosition;
+      setPosition   = syncData.state == AlgorithmState::setPosition;
+      movePosition  = syncData.state == AlgorithmState::move;
+	}
+  }
+
  void updateViewMatrixFromCamera()
   {
+   if(m_algo->isAlgorithmRunning())
+   {
+     if(setPosition)
+     {
+       m_camera->setPositionOnSphere(newPosition);
+	 }
+     else if(movePosition)
+     {
+       m_camera->move(moveDirection);
+	 }
+   }
+
     viewMatrix = m_camera->getViewMatrix();
     // std::cout << m_camera->getRoll() << "\n";
     viewInvMatrix = glm::inverse(viewMatrix);
@@ -1292,9 +1371,9 @@ public:
       // Rotate
       for(auto& triangle : triangles)
       {
-        triangle.v0 = glm::vec4(triangle.v0, 0) * bestMatrix;
-        triangle.v1 = glm::vec4(triangle.v1, 0) * bestMatrix;
-        triangle.v2 = glm::vec4(triangle.v2, 0) * bestMatrix;
+        triangle.v0 = glm::vec4(triangle.v0, 0) * bestRotation;
+        triangle.v1 = glm::vec4(triangle.v1, 0) * bestRotation;
+        triangle.v2 = glm::vec4(triangle.v2, 0) * bestRotation;
       }
 
       // Save as stl
@@ -1305,7 +1384,7 @@ public:
     {
       std::cout << "Saving quaternion...";
       // Save as quaternion (this is used to rotate the model inside Cura)
-      auto          bestQuat = glm::quat_cast(bestMatrix);
+      auto          bestQuat = glm::quat_cast(bestRotation);
       std::ofstream quatOfstream(inputs.outputQuatFilePath);
       quatOfstream << bestQuat.x << " " << bestQuat.y << " " << bestQuat.z << " " << bestQuat.w << "\n";
       quatOfstream.close();
@@ -1366,10 +1445,23 @@ public:
   // Camera
   std::shared_ptr<nvapp::CustomCamera> m_camera{};
   bool                                 hasRtx = false;
+  // Algorithm
+  std::unique_ptr<AlgorithmSync> m_algo;
+  bool startAlgorithm = true;
+  bool initiatedByAlgorithm = false;  // Whether to kill after algorithm finishes
+
 private:
+  // Set by algorithm (info for camera)
+  shaderio::float2 moveDirection;
+  shaderio::float3 newPosition;
+  bool             setPosition = false;
+  bool             movePosition  = false;
+
   // Other
   bool useFixedAreaResolution = false; // fixed width x height
   float areaResolution         = 0; // used to calculate width x height 
+  float maxSupportHeight = 0; // maximum support height (used to display relative colors)
+  float maxAreaResolution = 0; // maximum area resolution (used to limit areaResolution)
   
   // Volume integration
   nvshaders::VolumeIntegrateCompute m_volumeIntegrateCompute{};
@@ -1379,7 +1471,9 @@ private:
   nvvk::Buffer                m_outVolumeBufferForReduction;  // Buffer for volume reduction
   float                       volume    = 0;
   float                       minVolume = std::numeric_limits<float>().max();
-  shaderio::float4x4          bestMatrix;  // Used to save the result
+  shaderio::float4x4          bestRotation;  // Used to save the result
+  //shaderio::float4x4          bestMatrixFromAlgo;
+  //float                       minVolumeFromAlgo = std::numeric_limits<float>().max();
 
   // AABB
   nvshaders::AABBCompute      m_aabbCompute{};
@@ -1535,29 +1629,35 @@ int main(int argc, char** argv)
   appInfo.device         = vkContext.getDevice();
   appInfo.physicalDevice = vkContext.getPhysicalDevice();
   appInfo.queues         = vkContext.getQueueInfos();
+  appInfo.vSync          = false;
 
 
   // Create the application
   nvapp::Application application;
   application.init(appInfo);
 
+  // Algorithms
+  auto algoSync = std::make_unique<AlgorithmSync>();
+  //algoSync.get()->startAlgorithm();
+
   // Elements added to the application
-  auto tutorial   = std::make_shared<GCodeOptimizer2>(inputs);               // Our tutorial element
+  auto g_code_optimizer2   = std::make_shared<GCodeOptimizer2>(inputs);               // Our tutorial element
   //auto elemCamera = std::make_shared<nvapp::ElementCamera>();  // Element to control the camera movement
   auto windowTitle = std::make_shared<nvapp::ElementDefaultWindowTitle>();  // Element displaying the window title with application name and size
   auto windowMenu = std::make_shared<nvapp::ElementDefaultMenu>();  // Element displaying a menu, File->Exit ...
   //auto camManip   = tutorial->getCameraManipulator();
   //elemCamera->setCameraManipulator(camManip);
   auto customCamera = std::make_shared<nvapp::CustomCamera>();
-  tutorial->m_camera = customCamera;
-  tutorial->hasRtx   = vkContext.hasExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+  g_code_optimizer2->m_camera = customCamera;
+  g_code_optimizer2->m_algo   = std::move(algoSync);
+  g_code_optimizer2->hasRtx   = vkContext.hasExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
 
   // Adding all elements
   application.addElement(windowMenu);
   application.addElement(windowTitle);
   //application.addElement(elemCamera);
   application.addElement(customCamera);
-  application.addElement(tutorial);
+  application.addElement(g_code_optimizer2);
 
   application.run();     // Start the application, loop until the window is closed
   application.deinit();  // Closing application

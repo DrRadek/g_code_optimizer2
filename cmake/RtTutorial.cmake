@@ -26,8 +26,12 @@ function(setup_rt_tutorial_sample)
     message(STATUS "Processing: ${PROJECT_NAME}")
 
     # Adding all sources
-    file(GLOB EXE_SOURCES "*.cpp" "*.hpp" "*.md")
-    source_group("Source Files" FILES ${EXE_SOURCES})
+    file(GLOB_RECURSE EXE_SOURCES CONFIGURE_DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/*.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/*.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/*.md"
+    )
+    source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" PREFIX "Source Files" FILES ${EXE_SOURCES})
 
     # Handle RT common sources if requested
     set(ALL_SOURCES ${EXE_SOURCES})

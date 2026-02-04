@@ -38,6 +38,7 @@ struct RtxPushConstant
   GltfSceneInfo* sceneInfoAddress;  // Address of the scene information buffer
   float3         aabbMin;           // start of bounding box for volume calculation
   float3         aabbMax;           // end of bounding box for volume calculation
+  float			 maxSupportHeight;  // maximum support height (used for visualization only)
 };
 
 
@@ -49,6 +50,7 @@ struct TutoPushConstant
   GltfSceneInfo* sceneInfoAddress;           // Address of the scene information buffer
   float3         aabbMin;                    // start of bounding box for volume calculation
   float3         aabbMax;                    // end of bounding box for volume calculation
+  float          maxSupportHeight;           // maximum support height (used for visualization only)
 };
 
 

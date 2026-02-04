@@ -51,17 +51,13 @@ VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID)
   GltfInstance          instance = sceneInfo.instances[instanceIndex];
   GltfMesh              meshIo   = sceneInfo.meshes[instance.meshIndex];
 
-
   // Retrieve the data
   float3 posMesh  = getAttribute<float3>(meshIo.gltfBuffer, meshIo.triMesh.positions, vertexIndex);
-  //float3 normal   = getAttribute<float3>(meshIo.gltfBuffer, meshIo.triMesh.normals, vertexIndex);
 
   float4 pos = mul(float4(posMesh, 1.0), instance.transform);
 
   VSout output;
   output.sv_position   = mul(pos, sceneInfo.viewProjMatrix);
-  //output.worldPos      = pos.xyz;
-  //output.worldNormal   = normalize(mul(normal, float3x3(pushConst.normalMatrix)));
 
   return output;
 }
@@ -71,10 +67,16 @@ VSout vertexMain(VSin input, uint vertexIndex: SV_VertexID)
 PSout fragmentMain(VSout stage)
 {
   PSout output;
-  //output.color = float4(stage.worldNormal, 1.0);
-  //output.color = float4(stage.position.z, 1.0);
-  //output.color = float4(float3(stage.sv_position.z), 1.0);
-  output.color = float4(1.0,stage.sv_position.z,stage.sv_position.z, 1.0);
-  output.volume = (1 - stage.sv_position.z) * (pushConst.aabbMax.z - pushConst.aabbMin.z);
+
+  float volume = (1 - stage.sv_position.z) * (pushConst.aabbMax.z - pushConst.aabbMin.z);
+  output.volume = volume;
+
+  // Relative visual color
+  //output.color = float4(1.0,stage.sv_position.z,stage.sv_position.z, 1.0);
+
+  // Global visual color
+  float volumeScaled = volume / float(pushConst.maxSupportHeight);
+  output.color = float4(volumeScaled, 1.0 - volumeScaled, 0.0, 1.0);
+
   return output;
 }

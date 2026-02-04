@@ -7,6 +7,9 @@ CustomCamera::CustomCamera() {
 }
 
 void CustomCamera::onUIRender() {
+  if(!interactiveCameraEnabled)
+    return;
+
   nvutils::CameraManipulator::Inputs inputs;  // Mouse and keyboard inputs
 
   float wheelScrollAmount = ImGui::GetIO().MouseWheel;

@@ -198,14 +198,17 @@ void rgenMain()
     prevHitPos = hitPos;
   }
 
-  // black: accumulated == distance between top and bottom
-  // white: accumulated == 0
-  float maxDist = length(bottomWorld - topWorld);
-  float t = saturate((payload.accumDistance) / maxDist); // 0..1
-  float gray = 1.0 - t;
-  float3 finalColor = float3(1, gray, gray);
+  // Relative visual color
+  // float maxDist = length(bottomWorld - topWorld);
+  // float t = saturate((payload.accumDistance) / maxDist); // 0..1
+  // float gray = 1.0 - t;
+  // float3 finalColor = float3(1, gray, gray);
+  // outImage[launchID] = float4(finalColor, 1.0);
 
-  outImage[launchID] = float4(finalColor, 1.0);
+  // Global visual color
+  float volumeScaled = payload.accumDistance / float(pushConst.maxSupportHeight);
+  outImage[launchID] = float4(volumeScaled, 1.0 - volumeScaled, 0.0, 1.0);
+
   outVolume[launchID] = payload.accumDistance;
 }
 

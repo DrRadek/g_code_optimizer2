@@ -12,6 +12,8 @@ namespace nvapp {
 
 class CustomCamera : public nvapp::IAppElement
 {
+  bool interactiveCameraEnabled = true;
+
   // Manual mouse movement
   float stepSize = 0.01f;
   bool  dragging = false;
@@ -28,13 +30,18 @@ public:
   void move(glm::vec2 direction);
   void roll(float amount);
   void setPositionOnSphere(glm::vec3 position);
+  void setRotation(glm::quat rotation) { this->rotation = rotation; }
 
   glm::quat convertPositionToQuat(glm::vec3 position);
   glm::quat getQuatNoRoll(glm::quat quat);
+  glm::quat getRotation() { return rotation; }
 
   glm::mat4x4 getViewMatrix();
   glm::mat4x4 getViewMatrixNoRoll();
   float getRoll();
+
+  void enableInteractive() { interactiveCameraEnabled = true; }
+  void disableInteractive() { interactiveCameraEnabled = false; }
 };
 
 }  // namespace nvapp
