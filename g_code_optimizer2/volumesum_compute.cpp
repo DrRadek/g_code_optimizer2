@@ -79,8 +79,7 @@ void nvshaders::VolumeSumCompute::deinit()
 #include <iostream>
 void nvshaders::VolumeSumCompute::runCompute(VkCommandBuffer cmd, int elementCount, nvvk::Buffer* srcBuffer, nvvk::Buffer* dstBuffer)
 {
-  nvvk::cmdBufferMemoryBarrier(cmd, {srcBuffer->buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                                     VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT});
+  nvvk::cmdBufferMemoryBarrier(cmd, {srcBuffer->buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT});
 
   nvvk::Buffer* finalBuffer = srcBuffer;
 

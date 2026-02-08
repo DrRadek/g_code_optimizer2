@@ -5,7 +5,7 @@
 #include <imgui/imgui_internal.h>
 #include <nvutils/camera_manipulator.hpp>
 
-#include <nvapp/application.hpp> 
+#include <nvapp/application.hpp>
 #include <glm/gtx/quaternion.hpp>
 
 namespace nvapp {
@@ -15,8 +15,8 @@ class CustomCamera : public nvapp::IAppElement
   bool interactiveCameraEnabled = true;
 
   // Manual mouse movement
-  float stepSize = 0.01f;
-  bool  dragging = false;
+  float     stepSize = 0.01f;
+  bool      dragging = false;
   glm::vec2 lastMousePos;
 
   // Camera info
@@ -38,7 +38,7 @@ public:
 
   glm::mat4x4 getViewMatrix();
   glm::mat4x4 getViewMatrixNoRoll();
-  float getRoll();
+  float       getRoll();
 
   void enableInteractive() { interactiveCameraEnabled = true; }
   void disableInteractive() { interactiveCameraEnabled = false; }

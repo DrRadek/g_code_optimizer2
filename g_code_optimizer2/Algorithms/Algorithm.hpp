@@ -10,16 +10,17 @@
 class Algorithm
 {
 public:
-  void run() {
-      algorithmLogic();
-  }
+  void run() { algorithmLogic(); }
 
 private:
-  bool waitForRenderer() {
+  bool waitForRenderer()
+  {
     std::unique_lock lock(syncInfo.mtx);
-    syncInfo.cv.wait(lock, [&] { return syncInfo.syncState == SyncState::RendererDone || syncInfo.syncState == SyncState::ShuttingDown; });
+    syncInfo.cv.wait(lock, [&] {
+      return syncInfo.syncState == SyncState::RendererDone || syncInfo.syncState == SyncState::ShuttingDown;
+    });
 
-    currentVolume = syncData.result;
+    currentVolume   = syncData.result;
     currentRotation = syncData.resultRotation;
 
     return syncInfo.syncState != SyncState::ShuttingDown;
@@ -29,10 +30,10 @@ private:
   {
     {
       std::lock_guard<std::mutex> lock(syncInfo.mtx);
-      syncData.result = bestVolume;
+      syncData.result         = bestVolume;
       syncData.resultRotation = bestRotation;
-      syncData.state = AlgorithmState::done;
-      syncInfo.syncState = SyncState::AlgorithmDone;
+      syncData.state          = AlgorithmState::done;
+      syncInfo.syncState      = SyncState::AlgorithmDone;
     }
     syncInfo.cv.notify_one();
   }
@@ -41,7 +42,7 @@ private:
   {
     {
       std::lock_guard<std::mutex> lock(syncInfo.mtx);
-      syncData.newQuat     = newQuat;
+      syncData.newQuat         = newQuat;
       syncData.skipCalculation = skipCalculation;
       std::cout << "skip calculation? : " << syncData.skipCalculation << "\n";
 
@@ -55,11 +56,11 @@ private:
   {
     {
       std::lock_guard<std::mutex> lock(syncInfo.mtx);
-      syncData.newPosition   = newPosition;
+      syncData.newPosition     = newPosition;
       syncData.skipCalculation = skipCalculation;
       std::cout << "skip calculation? : " << syncData.skipCalculation << "\n";
 
-      syncData.state = AlgorithmState::setPosition;
+      syncData.state     = AlgorithmState::setPosition;
       syncInfo.syncState = SyncState::AlgorithmDone;
     }
     syncInfo.cv.notify_one();
@@ -69,10 +70,10 @@ private:
   {
     {
       std::lock_guard<std::mutex> lock(syncInfo.mtx);
-      syncData.moveDirection = moveDirection;
+      syncData.moveDirection   = moveDirection;
       syncData.skipCalculation = skipCalculation;
 
-      syncData.state = AlgorithmState::move;
+      syncData.state     = AlgorithmState::move;
       syncInfo.syncState = SyncState::AlgorithmDone;
     }
     syncInfo.cv.notify_one();
@@ -83,17 +84,16 @@ protected:
   SyncData& syncData;
   bool      shutting_down = false;
 
-  float currentVolume = 0;
+  float     currentVolume = 0;
   glm::quat currentRotation;
 
-  float bestVolume = std::numeric_limits<float>::max();
+  float     bestVolume = std::numeric_limits<float>::max();
   glm::quat bestRotation;
 
   Algorithm(SyncInfo& syncInfo, SyncData& syncData)
       : syncInfo(syncInfo)
       , syncData(syncData)
   {
-
   }
 
 public:
@@ -107,9 +107,9 @@ public:
   // Request volume and wait for result
   bool requestVolumeForPosition(shaderio::float3 newPosition, bool skipCalculation = false)
   {
-      notifyRendererNewPos(newPosition, skipCalculation);
+    notifyRendererNewPos(newPosition, skipCalculation);
 
-      return waitForRenderer();
+    return waitForRenderer();
   }
 
   bool requestVolumeForMove(shaderio::float2 move, bool skipCalculation = false)
@@ -119,26 +119,20 @@ public:
     return waitForRenderer();
   }
 
-  void finishAlgorithm()
-  {
-    notifyRendererDone();
-  }
+  void finishAlgorithm() { notifyRendererDone(); }
 
   // Loop
   virtual void algorithmLogic() = 0;
 
-  float getCurrentVolume() {
-      return currentVolume;
-  }
+  float getCurrentVolume() { return currentVolume; }
 
-  glm::quat getCurrentRotation() {
-      return currentRotation;
-  }
+  glm::quat getCurrentRotation() { return currentRotation; }
 };
 
 class TestAlgorithm : public Algorithm
 {
-  void algorithmLogic() override {
+  void algorithmLogic() override
+  {
     while(true)
     {
       std::cout << "requesting volume" << "\n";
@@ -151,6 +145,7 @@ class TestAlgorithm : public Algorithm
 
 public:
   TestAlgorithm(SyncInfo& syncInfo, SyncData& syncData)
-      : Algorithm(syncInfo, syncData) {
+      : Algorithm(syncInfo, syncData)
+  {
   }
 };

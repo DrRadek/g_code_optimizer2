@@ -72,31 +72,32 @@ void nvshaders::VolumeIntegrateCompute::deinit()
   m_device                    = VK_NULL_HANDLE;
 }
 
-void nvshaders::VolumeIntegrateCompute::runCompute(VkCommandBuffer cmd,
-                                                   VkImageView     srcImageView,
-                                                   nvvk::Buffer*   dstBuffer,
-                                                   shaderio::uint2 textureSize,
+void nvshaders::VolumeIntegrateCompute::runCompute(VkCommandBuffer  cmd,
+                                                   VkImageView      srcImageView,
+                                                   nvvk::Buffer*    dstBuffer,
+                                                   shaderio::uint2  textureSize,
                                                    shaderio::float2 areaSize)
 {
-	shaderio::uint2 groupCount = {std::ceil(textureSize.x / (float)VOLUME_INTEGRATE_SHADER_WG_SIZE),
+  shaderio::uint2 groupCount = {std::ceil(textureSize.x / (float)VOLUME_INTEGRATE_SHADER_WG_SIZE),
                                 std::ceil(textureSize.y / (float)VOLUME_INTEGRATE_SHADER_WG_SIZE)};
 
-	pushConst.image_size = textureSize;
-	pushConst.area_size  = areaSize;
+  pushConst.image_size = textureSize;
+  pushConst.area_size  = areaSize;
 
-	// Push constant
-    vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(shaderio::VolumeIntegratePushConstant), &pushConst);
+  // Push constant
+  vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(shaderio::VolumeIntegratePushConstant), &pushConst);
 
-	nvvk::WriteSetContainer writeSetContainer;
-	writeSetContainer.append(m_descriptorPack.makeWrite(shaderio::volume_integrate_Binding::vInImage), srcImageView, VK_IMAGE_LAYOUT_GENERAL);
-	writeSetContainer.append(m_descriptorPack.makeWrite(shaderio::volume_integrate_Binding::vOutVolume), dstBuffer);
-	vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, writeSetContainer.size(),
-								writeSetContainer.data());
+  nvvk::WriteSetContainer writeSetContainer;
+  writeSetContainer.append(m_descriptorPack.makeWrite(shaderio::volume_integrate_Binding::vInImage), srcImageView,
+                           VK_IMAGE_LAYOUT_GENERAL);
+  writeSetContainer.append(m_descriptorPack.makeWrite(shaderio::volume_integrate_Binding::vOutVolume), dstBuffer);
+  vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, writeSetContainer.size(),
+                            writeSetContainer.data());
 
-	// Run
-	vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_volumeIntegrationPipeline);
-    vkCmdDispatch(cmd, groupCount.x, groupCount.y, 1);
+  // Run
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_volumeIntegrationPipeline);
+  vkCmdDispatch(cmd, groupCount.x, groupCount.y, 1);
 
-	// Barrier
-	nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+  // Barrier
+  nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
 }

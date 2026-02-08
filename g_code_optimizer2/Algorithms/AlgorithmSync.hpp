@@ -16,11 +16,10 @@ class AlgorithmSync
 {
 public:
   AlgorithmSync() = default;
-  ~AlgorithmSync() {
-      stopAlgorithm();
-  }
+  ~AlgorithmSync() { stopAlgorithm(); }
 
-  void startAlgorithm() {
+  void startAlgorithm()
+  {
     stopAlgorithm();
 
     syncInfo.syncState = SyncState::RendererDone;
@@ -28,7 +27,8 @@ public:
     algorithmRunning = true;
   }
 
-  void stopAlgorithm() {
+  void stopAlgorithm()
+  {
     if(algorithm_thread.joinable())
     {
       {
@@ -41,9 +41,7 @@ public:
     algorithmRunning = false;
   }
 
-  bool isAlgorithmRunning() {
-      return algorithmRunning;
-  }
+  bool isAlgorithmRunning() { return algorithmRunning; }
 
   // returns done/not done
   SyncData waitForAlgorithm()
@@ -53,19 +51,20 @@ public:
     return syncData;
   }
 
-  void notifyAlgorithm(float resultVolume, glm::quat resultRotation) {
+  void notifyAlgorithm(float resultVolume, glm::quat resultRotation)
+  {
     {
       std::lock_guard<std::mutex> lock(syncInfo.mtx);
-      syncData.result    = resultVolume;
+      syncData.result         = resultVolume;
       syncData.resultRotation = resultRotation;
-      syncInfo.syncState = SyncState::RendererDone;
+      syncInfo.syncState      = SyncState::RendererDone;
     }
     syncInfo.cv.notify_one();
   }
 
 private:
   // algorithm thread
-  std::thread       algorithm_thread;
+  std::thread algorithm_thread;
   bool        algorithmRunning = false;
 
   SyncInfo syncInfo{};

@@ -20,7 +20,7 @@ public:
   VkResult init(nvvk::ResourceAllocator* alloc, std::span<const uint32_t> spirv);
   void     deinit();
 
-  void  runCompute(VkCommandBuffer cmd, VkImageView srcImageView, nvvk::Buffer* dstBuffer, shaderio::uint2 textureSize, shaderio::float2 areaSize);
+  void runCompute(VkCommandBuffer cmd, VkImageView srcImageView, nvvk::Buffer* dstBuffer, shaderio::uint2 textureSize, shaderio::float2 areaSize);
 
 private:
   nvvk::ResourceAllocator* m_alloc{};

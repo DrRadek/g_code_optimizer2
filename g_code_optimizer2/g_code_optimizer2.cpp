@@ -26,12 +26,12 @@
 #include "_autogen/volume_calculation_rtx.slang.h"     // Local shader
 
 
-#include <nvaftermath/aftermath.hpp>         // Nsight Aftermath for crash tracking and shader debugging
-#include <nvapp/application.hpp>             // Application framework
-#include <nvapp/elem_camera.hpp>             // Camera manipulator
-#include <nvapp/elem_default_title.hpp>      // Default title element
-#include <nvapp/elem_default_menu.hpp>       // Default menu element
-#include <nvgui/camera.hpp>                  // Camera widget
+#include <nvaftermath/aftermath.hpp>     // Nsight Aftermath for crash tracking and shader debugging
+#include <nvapp/application.hpp>         // Application framework
+#include <nvapp/elem_camera.hpp>         // Camera manipulator
+#include <nvapp/elem_default_title.hpp>  // Default title element
+#include <nvapp/elem_default_menu.hpp>   // Default menu element
+#include <nvgui/camera.hpp>              // Camera widget
 
 #include "nvgui/property_editor.hpp"
 #include <nvvk/check_error.hpp>
@@ -95,7 +95,7 @@ class GCodeOptimizer2 : public nvapp::IAppElement
   enum
   {
     eImgRendered,
-	eImgVolume
+    eImgVolume
   };
 
 public:
@@ -157,14 +157,14 @@ public:
     // Create the G-Buffers
     nvvk::GBufferInitInfo gBufferInit{
         .allocator      = &m_allocator,
-        .colorFormats = {VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R32_SFLOAT},  // Render target
+        .colorFormats   = {VK_FORMAT_R32G32B32A32_SFLOAT, VK_FORMAT_R32_SFLOAT},  // Render target
         .depthFormat    = nvvk::findDepthFormat(m_app->getPhysicalDevice()),
         .imageSampler   = linearSampler,
         .descriptorPool = m_app->getTextureDescriptorPool(),
     };
     m_gBuffers.init(gBufferInit);
 
-	auto cmd = m_app->createTempCmdBuffer();
+    auto cmd = m_app->createTempCmdBuffer();
     resizeBuffers(cmd, m_maxRenderResolution);
     m_app->submitAndWaitTempCmdBuffer(cmd);
 
@@ -174,18 +174,18 @@ public:
     compileAndCreateGraphicsShaders();    // Compile the graphics shaders and create the shader modules
     updateTextures();                     // Update the textures in the descriptor set (if any)
 
-	if(hasRtx)
+    if(hasRtx)
     {
-		// Get ray tracing properties
-		VkPhysicalDeviceProperties2 prop2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
-		prop2.pNext = &m_rtProperties;
-		vkGetPhysicalDeviceProperties2(m_app->getPhysicalDevice(), &prop2);
+      // Get ray tracing properties
+      VkPhysicalDeviceProperties2 prop2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+      prop2.pNext = &m_rtProperties;
+      vkGetPhysicalDeviceProperties2(m_app->getPhysicalDevice(), &prop2);
 
-		// Initialize acceleration structure builder
-		m_asBuilder.init(&m_allocator, &m_stagingUploader, m_app->getQueue(0));
+      // Initialize acceleration structure builder
+      m_asBuilder.init(&m_allocator, &m_stagingUploader, m_app->getQueue(0));
 
-		// Initialize SBT generator
-		m_sbtGenerator.init(m_app->getDevice(), m_rtProperties);
+      // Initialize SBT generator
+      m_sbtGenerator.init(m_app->getDevice(), m_rtProperties);
 
       // Set up acceleration structure infrastructure
       createBottomLevelAS();  // Set up BLAS infrastructure
@@ -196,24 +196,24 @@ public:
       createRayTracingPipeline();        // Create pipeline structure and SBT
     }
 
-	m_aabbCompute.cleanupAfterInit(&m_allocator);
+    m_aabbCompute.cleanupAfterInit(&m_allocator);
     m_volumeIntegrateCompute.init(&m_allocator, volume_integrate_slang);
     m_volumeSumCompute.init(&m_allocator, volumesum_compute_slang);
 
-	// Calculate limits
+    // Calculate limits
     {
       updateViewMatrixFromCamera();
       RecalculateAABB();
-      maxSupportHeight  = glm::distance(aabbMin, aabbMax);
-      minCellSize = maxSupportHeight / (float)maxResolutionHeight;
+      maxSupportHeight = glm::distance(aabbMin, aabbMax);
+      minCellSize      = maxSupportHeight / (float)maxResolutionHeight;
 
       std::cout << "max support height: " << maxSupportHeight << "\n";
       std::cout << "min cell size: " << minCellSize << "\n";
 
       if(areaResolution < minCellSize)
       {
-        std::string error = "Error: cell size is too small to fit in texture. Min cell size is "
-                            + std::to_string(minCellSize) + "\n";
+        std::string error =
+            "Error: cell size is too small to fit in texture. Min cell size is " + std::to_string(minCellSize) + "\n";
         std::cout << error;
         throw std::runtime_error(error);
       }
@@ -284,41 +284,41 @@ public:
     if(ImGui::Begin("Settings"))
     {
       // Ray tracing toggle
-      if (hasRtx)
-		ImGui::Checkbox("Use Ray Tracing", &m_useRayTracing);
+      if(hasRtx)
+        ImGui::Checkbox("Use Ray Tracing", &m_useRayTracing);
 
       if(ImGui::CollapsingHeader("Environment"))
       {
-		PE::begin();
-		PE::ColorEdit3("Background", (float*)&m_sceneResource.sceneInfo.backgroundColor);
-		PE::end();
-		// Light
-		PE::begin();
-		if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::ePoint
-			|| m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-		{
-		PE::DragFloat3("Light Position", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].position), 1.0f,
-						-20.0f, 20.0f, "%.2f", ImGuiSliderFlags_None, "Position of the light");
-		}
-		if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eDirectional
-			|| m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-		{
-		PE::SliderFloat3("Light Direction", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].direction),
-							-1.0f, 1.0f, "%.2f", ImGuiSliderFlags_None, "Direction of the light");
-		}
+        PE::begin();
+        PE::ColorEdit3("Background", (float*)&m_sceneResource.sceneInfo.backgroundColor);
+        PE::end();
+        // Light
+        PE::begin();
+        if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::ePoint
+           || m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
+        {
+          PE::DragFloat3("Light Position", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].position), 1.0f,
+                         -20.0f, 20.0f, "%.2f", ImGuiSliderFlags_None, "Position of the light");
+        }
+        if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eDirectional
+           || m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
+        {
+          PE::SliderFloat3("Light Direction", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].direction),
+                           -1.0f, 1.0f, "%.2f", ImGuiSliderFlags_None, "Direction of the light");
+        }
 
-		PE::SliderFloat("Light Intensity", &m_sceneResource.sceneInfo.punctualLights[0].intensity, 0.0f, 1000.0f,
-						"%.2f", ImGuiSliderFlags_Logarithmic, "Intensity of the light");
-		PE::ColorEdit3("Light Color", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].color),
-						ImGuiColorEditFlags_NoInputs, "Color of the light");
-		PE::Combo("Light Type", (int*)&m_sceneResource.sceneInfo.punctualLights[0].type, "Point\0Spot\0Directional\0",
-				3, "Type of the light (Point, Spot, Directional)");
-		if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-		{
-		PE::SliderAngle("Cone Angle", &m_sceneResource.sceneInfo.punctualLights[0].coneAngle, 0.f, 90.f, "%.2f",
-						ImGuiSliderFlags_AlwaysClamp, "Cone angle of the spot light");
-		}
-		PE::end();
+        PE::SliderFloat("Light Intensity", &m_sceneResource.sceneInfo.punctualLights[0].intensity, 0.0f, 1000.0f,
+                        "%.2f", ImGuiSliderFlags_Logarithmic, "Intensity of the light");
+        PE::ColorEdit3("Light Color", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].color),
+                       ImGuiColorEditFlags_NoInputs, "Color of the light");
+        PE::Combo("Light Type", (int*)&m_sceneResource.sceneInfo.punctualLights[0].type, "Point\0Spot\0Directional\0",
+                  3, "Type of the light (Point, Spot, Directional)");
+        if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
+        {
+          PE::SliderAngle("Cone Angle", &m_sceneResource.sceneInfo.punctualLights[0].coneAngle, 0.f, 90.f, "%.2f",
+                          ImGuiSliderFlags_AlwaysClamp, "Cone angle of the spot light");
+        }
+        PE::end();
       }
 
       ImGui::Separator();
@@ -330,19 +330,18 @@ public:
         PE::SliderFloat("volume", &volume, 1e5, 1e8, "%.2f", ImGuiSliderFlags_AlwaysClamp, "volume");
         PE::SliderFloat("min volume", &minVolume, 1e5, 1e8, "%.2f", ImGuiSliderFlags_AlwaysClamp, "min volume");
 
-		bool maxWidthChanged = PE::SliderInt("Max resolution width", &maxResolutionWidth, 1, 4096, "%d", ImGuiSliderFlags_AlwaysClamp, "Max resolution width");
-        bool maxHeightChanged = PE::SliderInt("Max resolution height", &maxResolutionHeight, 1, 4096, "%d", ImGuiSliderFlags_AlwaysClamp, "Max resolution height");
-    bool currentWidthChanged = PE::SliderInt("Current resolution width", &currentResolutionWidth, 1, maxResolutionWidth,
-                                             "%d",
-                        ImGuiSliderFlags_AlwaysClamp, "Current resolution width");
+        bool maxWidthChanged  = PE::SliderInt("Max resolution width", &maxResolutionWidth, 1, 4096, "%d",
+                                              ImGuiSliderFlags_AlwaysClamp, "Max resolution width");
+        bool maxHeightChanged = PE::SliderInt("Max resolution height", &maxResolutionHeight, 1, 4096, "%d",
+                                              ImGuiSliderFlags_AlwaysClamp, "Max resolution height");
+        bool currentWidthChanged = PE::SliderInt("Current resolution width", &currentResolutionWidth, 1, maxResolutionWidth,
+                                                 "%d", ImGuiSliderFlags_AlwaysClamp, "Current resolution width");
         bool currentHeightChanged = PE::SliderInt("Current resolution height", &currentResolutionHeight, 1, maxResolutionHeight,
-                                                  "%d",
-                                             ImGuiSliderFlags_AlwaysClamp,
-                      "Current resolution height");
-		PE::SliderFloat("area resolution", &areaResolution,0.001f, 1, "%.2f", ImGuiSliderFlags_AlwaysClamp, "area resolution");
+                                                  "%d", ImGuiSliderFlags_AlwaysClamp, "Current resolution height");
+        PE::SliderFloat("area resolution", &areaResolution, 0.001f, 1, "%.2f", ImGuiSliderFlags_AlwaysClamp, "area resolution");
         PE::Checkbox("Use fixed area resolution", &useFixedAreaResolution, "Use fixed area resolution");
 
-		if(currentResolutionWidth > maxResolutionWidth)
+        if(currentResolutionWidth > maxResolutionWidth)
         {
           currentResolutionWidth = maxResolutionWidth;
         }
@@ -351,14 +350,14 @@ public:
           currentResolutionHeight = maxResolutionHeight;
         }
 
-		if(currentWidthChanged || currentHeightChanged)
+        if(currentWidthChanged || currentHeightChanged)
         {
           currentResolutionChanged = true;
         }
 
         if(maxWidthChanged || maxHeightChanged)
         {
-          maxResolutionChanged = true;
+          maxResolutionChanged     = true;
           currentResolutionChanged = true;
         }
         PE::end();
@@ -387,11 +386,13 @@ public:
   //---------------------------------------------------------------------------------------------------------------
   // When the viewport is resized, the GBuffer must be resized
   // - Called when the Window "viewport is resized
-  void onResize(VkCommandBuffer cmd, const VkExtent2D& size) {
-	  // No longer needed, viewport resolution is unrelated to render resolution
+  void onResize(VkCommandBuffer cmd, const VkExtent2D& size)
+  {
+    // No longer needed, viewport resolution is unrelated to render resolution
   }
 
-  void resizeBuffers(VkCommandBuffer cmd, const VkExtent2D& size) {
+  void resizeBuffers(VkCommandBuffer cmd, const VkExtent2D& size)
+  {
     NVVK_CHECK(m_gBuffers.update(cmd, size));
 
     // recreate outVolume buffer to match new size
@@ -409,7 +410,7 @@ public:
                              VMA_MEMORY_USAGE_AUTO);
     NVVK_DBG_NAME(m_outVolumeBuffer.buffer);
 
-	if(m_outVolumeBufferForReduction.buffer != VK_NULL_HANDLE)
+    if(m_outVolumeBufferForReduction.buffer != VK_NULL_HANDLE)
     {
       m_allocator.destroyBuffer(m_outVolumeBufferForReduction);
     }
@@ -418,9 +419,7 @@ public:
     NVVK_DBG_NAME(m_outVolumeBufferForReduction.buffer);
   }
 
-  void onPreRender() {
-
-  }
+  void onPreRender() {}
 
   //---------------------------------------------------------------------------------------------------------------
   // Rendering the scene
@@ -431,19 +430,19 @@ public:
   {
     NVVK_DBG_SCOPE(cmd);  // <-- Helps to debug in NSight
 
-	// Calculate volume
-	GetVolumeCalculationResult();
+    // Calculate volume
+    GetVolumeCalculationResult();
 
-	// Algorithm synchronization
-	RunAlgorithm();
+    // Algorithm synchronization
+    RunAlgorithm();
 
-	// Update view matrix
-	updateViewMatrixFromCamera();
+    // Update view matrix
+    updateViewMatrixFromCamera();
 
-	// Recalculate AABB
+    // Recalculate AABB
     RecalculateAABB();
 
-	// Update resolution to fit the space
+    // Update resolution to fit the space
     updateResolution();
 
     // Update the scene information buffer, this cannot be done in between dynamic rendering
@@ -458,9 +457,9 @@ public:
       rasterScene(cmd);
     }
 
-	IntegrateVolume(cmd);
+    IntegrateVolume(cmd);
 
-	CalculateVolume(cmd);
+    CalculateVolume(cmd);
 
     //postProcess(cmd);
   }
@@ -519,16 +518,12 @@ public:
 
     m_sceneResource.materials = {
         // Teapot material
-        {.baseColorFactor = glm::vec4(0.8f, 1.0f, 0.6f, 1.0f), .metallicFactor = 0.5f, .roughnessFactor = 0.5f}
-	};
+        {.baseColorFactor = glm::vec4(0.8f, 1.0f, 0.6f, 1.0f), .metallicFactor = 0.5f, .roughnessFactor = 0.5f}};
 
 
     m_sceneResource.instances = {
         // Teapot
-        {.transform     = glm::translate(glm::mat4(1), glm::vec3(0, 0, 0)),
-         .materialIndex = 0,
-         .meshIndex     = 0}
-    };
+        {.transform = glm::translate(glm::mat4(1), glm::vec3(0, 0, 0)), .materialIndex = 0, .meshIndex = 0}};
 
 
     nvsamples::createGltfSceneInfoBuffer(m_sceneResource, m_stagingUploader);  // Create buffers for the scene data (GPU buffers)
@@ -540,7 +535,7 @@ public:
     sceneInfo.instances = (shaderio::GltfInstance*)m_sceneResource.bInstances.address;  // Address of the instance buffer
     sceneInfo.meshes = (shaderio::GltfMesh*)m_sceneResource.bMeshes.address;            // Address of the mesh buffer
     sceneInfo.materials = (shaderio::GltfMetallicRoughness*)m_sceneResource.bMaterials.address;  // Address of the material buffer
-    sceneInfo.backgroundColor             = {1.0f, 1.0f, 1.0f};                               // The background color
+    sceneInfo.backgroundColor             = {1.0f, 1.0f, 1.0f};                                  // The background color
     sceneInfo.numLights                   = 1;
     sceneInfo.punctualLights[0].color     = glm::vec3(1.0f, 1.0f, 1.0f);
     sceneInfo.punctualLights[0].intensity = 4.0f;
@@ -598,10 +593,7 @@ public:
 
 
   //--------------------------------------------------------------------------------------------------
-  void updateTextures()
-  {
-
-  }
+  void updateTextures() {}
 
   // This function is used to compile the Slang shader, and when it fails, it will use the pre-compiled shaders
   VkShaderModuleCreateInfo compileSlangShader(const std::filesystem::path& filename, const std::span<const uint32_t>& spirv)
@@ -695,7 +687,7 @@ public:
   {
     NVVK_DBG_SCOPE(cmd);  // <-- Helps to debug in NSight
 
-	float     width      = aabbMax.x - aabbMin.x;
+    float     width      = aabbMax.x - aabbMin.x;
     float     height     = aabbMax.y - aabbMin.y;
     float     halfStepX  = 0.5f * width / float(m_currentRenderResolution.width - 1);
     float     halfStepY  = 0.5f * height / float(m_currentRenderResolution.height - 1);
@@ -704,8 +696,8 @@ public:
 
     m_sceneResource.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;   // Combine the view and projection matrices
     m_sceneResource.sceneInfo.projInvMatrix  = glm::inverse(projMatrix);  // Inverse projection matrix
-    m_sceneResource.sceneInfo.viewInvMatrix  = viewInvMatrix;  // Inverse view matrix
-    m_sceneResource.sceneInfo.cameraPosition = {0, 0, 0}; // Get the camera position
+    m_sceneResource.sceneInfo.viewInvMatrix  = viewInvMatrix;             // Inverse view matrix
+    m_sceneResource.sceneInfo.cameraPosition = {0, 0, 0};                 // Get the camera position
     m_sceneResource.sceneInfo.instances = (shaderio::GltfInstance*)m_sceneResource.bInstances.address;  // Get the address of the instance buffer
     m_sceneResource.sceneInfo.meshes = (shaderio::GltfMesh*)m_sceneResource.bMeshes.address;  // Get the address of the mesh buffer
     m_sceneResource.sceneInfo.materials = (shaderio::GltfMetallicRoughness*)m_sceneResource.bMaterials.address;  // Get the address of the material buffer
@@ -713,13 +705,12 @@ public:
     // Making sure the scene information buffer is updated before rendering
     // Wait that the fragment and raytracing shader is done reading the previous scene information and wait for the transfer to complete
     nvvk::cmdBufferMemoryBarrier(cmd, {m_sceneResource.bSceneInfo.buffer,
-                                       (m_useRayTracing && hasRtx) ? VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR :
-														 VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                                       (m_useRayTracing && hasRtx) ? VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                                        VK_PIPELINE_STAGE_2_TRANSFER_BIT});
     vkCmdUpdateBuffer(cmd, m_sceneResource.bSceneInfo.buffer, 0, sizeof(shaderio::GltfSceneInfo), &m_sceneResource.sceneInfo);
     nvvk::cmdBufferMemoryBarrier(cmd, {m_sceneResource.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                                        (m_useRayTracing & hasRtx) ? VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR :
-                                                         VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT});
+                                                                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT});
   }
 
 
@@ -731,12 +722,10 @@ public:
     NVVK_DBG_SCOPE(cmd);  // <-- Helps to debug in NSight
 
     // Push constant information, see usage later
-    shaderio::TutoPushConstant pushValues{
-        .sceneInfoAddress = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,  // Pass the address of the scene information buffer to the shader
-        .aabbMin = aabbMin,
-		.aabbMax = aabbMax,
-        .maxSupportHeight = maxSupportHeight
-    };
+    shaderio::TutoPushConstant pushValues{.sceneInfoAddress = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,  // Pass the address of the scene information buffer to the shader
+                                          .aabbMin          = aabbMin,
+                                          .aabbMax          = aabbMax,
+                                          .maxSupportHeight = maxSupportHeight};
     const VkPushConstantsInfo pushInfo{
         .sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
         .layout     = m_graphicPipelineLayout,
@@ -749,16 +738,16 @@ public:
     // Rendering to the GBuffer
     VkRenderingAttachmentInfo colorAttachments[2] = {DEFAULT_VkRenderingAttachmentInfo, DEFAULT_VkRenderingAttachmentInfo};
 
-	// Img
-    colorAttachments[0].loadOp                 = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    colorAttachments[0].imageView              = m_gBuffers.getColorImageView(eImgRendered);
-    colorAttachments[0].clearValue             = {.color = {m_sceneResource.sceneInfo.backgroundColor.x,
-                                            m_sceneResource.sceneInfo.backgroundColor.y,
-                                            m_sceneResource.sceneInfo.backgroundColor.z, 1.0f}};
-	// Volume
-    colorAttachments[1].loadOp                  = VK_ATTACHMENT_LOAD_OP_CLEAR;
-	colorAttachments[1].imageView               = m_gBuffers.getColorImageView(eImgVolume);
-    colorAttachments[1].clearValue              = {.color = {0.0f}};
+    // Img
+    colorAttachments[0].loadOp     = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachments[0].imageView  = m_gBuffers.getColorImageView(eImgRendered);
+    colorAttachments[0].clearValue = {.color = {m_sceneResource.sceneInfo.backgroundColor.x,
+                                                m_sceneResource.sceneInfo.backgroundColor.y,
+                                                m_sceneResource.sceneInfo.backgroundColor.z, 1.0f}};
+    // Volume
+    colorAttachments[1].loadOp     = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachments[1].imageView  = m_gBuffers.getColorImageView(eImgVolume);
+    colorAttachments[1].clearValue = {.color = {0.0f}};
 
     VkRenderingAttachmentInfo depthAttachment = DEFAULT_VkRenderingAttachmentInfo;
     depthAttachment.imageView                 = m_gBuffers.getDepthImageView();
@@ -798,10 +787,8 @@ public:
 
     m_dynamicPipeline.colorBlendEnables = {VK_FALSE, VK_FALSE};
 
-    m_dynamicPipeline.colorWriteMasks = {
-        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
-        VK_COLOR_COMPONENT_R_BIT
-    };
+    m_dynamicPipeline.colorWriteMasks = {VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT,
+                                         VK_COLOR_COMPONENT_R_BIT};
 
     VkColorBlendEquationEXT defaultBlendEq{};
     defaultBlendEq.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
@@ -852,7 +839,7 @@ public:
 
     // ** END RENDERING **
     vkCmdEndRendering(cmd);
-	// Barriers
+    // Barriers
     nvvk::cmdImageMemoryBarrier(cmd, {m_gBuffers.getColorImage(eImgRendered), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                                       VK_IMAGE_LAYOUT_GENERAL});
     nvvk::cmdImageMemoryBarrier(cmd, {m_gBuffers.getDepthImage(),
@@ -865,10 +852,7 @@ public:
                                       {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}});
   }
 
-  void onLastHeadlessFrame() override
-  {
-
-  }
+  void onLastHeadlessFrame() override {}
 
   //--------------------------------------------------------------------------------------------------
   // Converting a PrimitiveMesh as input for BLAS
@@ -1113,12 +1097,10 @@ public:
     vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_RAY_TRACING_KHR, m_rtPipelineLayout, 1, write.size(), write.data());
 
     // Push constant information
-    shaderio::RtxPushConstant pushValues{
-        .sceneInfoAddress          = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,
-		.aabbMin = aabbMin,
-		.aabbMax = aabbMax,
-		.maxSupportHeight = maxSupportHeight
-    };
+    shaderio::RtxPushConstant pushValues{.sceneInfoAddress = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,
+                                         .aabbMin          = aabbMin,
+                                         .aabbMax          = aabbMax,
+                                         .maxSupportHeight = maxSupportHeight};
     const VkPushConstantsInfo pushInfo{.sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
                                        .layout     = m_rtPipelineLayout,
                                        .stageFlags = VK_SHADER_STAGE_ALL,
@@ -1140,48 +1122,45 @@ public:
   }
 
   // Recalculate AABB (GPU implementation)
-  void RecalculateAABB() {
+  void RecalculateAABB()
+  {
     VkCommandBuffer cmd = m_app->createTempCmdBuffer();
 
     auto sceneInfo = m_sceneResource.bSceneInfo;
     auto matrix    = viewInvMatrix;
 
-	m_aabbCompute.runCompute(cmd, matrix);
+    m_aabbCompute.runCompute(cmd, matrix);
     m_app->submitAndWaitTempCmdBuffer(cmd);
 
-	auto result = m_aabbCompute.readResult(&m_allocator);
+    auto result = m_aabbCompute.readResult(&m_allocator);
     aabbMin     = result.min;
     aabbMax     = result.max;
 
-	aabbMax.z += glm::max(aabbMax.z * 0.00001f, 0.001f);  // Add small epsilon
+    aabbMax.z += glm::max(aabbMax.z * 0.00001f, 0.001f);  // Add small epsilon
   }
 
-  void IntegrateVolume(VkCommandBuffer cmd) {
-    float width = (aabbMax.x - aabbMin.x);
+  void IntegrateVolume(VkCommandBuffer cmd)
+  {
+    float width  = (aabbMax.x - aabbMin.x);
     float height = (aabbMax.y - aabbMin.y);
 
-	// (n) * (m) => (n-1) * (m-1)
-    m_volumeIntegrateCompute.runCompute(
-		cmd,
-		m_gBuffers.getColorImageView(eImgVolume),
-		&m_outVolumeBuffer,
-        {
-			(m_currentRenderResolution.width),
-			m_currentRenderResolution.height},
-        { // size of one integrated area
-			(width) / (float)(m_currentRenderResolution.width - 1),
-            (height) / (float)(m_currentRenderResolution.height - 1)
-		}
-	);
+    // (n) * (m) => (n-1) * (m-1)
+    m_volumeIntegrateCompute.runCompute(cmd, m_gBuffers.getColorImageView(eImgVolume), &m_outVolumeBuffer,
+                                        {(m_currentRenderResolution.width), m_currentRenderResolution.height},
+                                        {// size of one integrated area
+                                         (width) / (float)(m_currentRenderResolution.width - 1),
+                                         (height) / (float)(m_currentRenderResolution.height - 1)});
   }
 
-  void CalculateVolume(VkCommandBuffer cmd) {
-	// (n-1) * (m-1) => 1
-    m_volumeSumCompute.runCompute(cmd, (m_currentRenderResolution.width -1) * (m_currentRenderResolution.height - 1),
+  void CalculateVolume(VkCommandBuffer cmd)
+  {
+    // (n-1) * (m-1) => 1
+    m_volumeSumCompute.runCompute(cmd, (m_currentRenderResolution.width - 1) * (m_currentRenderResolution.height - 1),
                                   &m_outVolumeBuffer, &m_outVolumeBufferForReduction);
   }
 
-  void GetVolumeCalculationResult() {
+  void GetVolumeCalculationResult()
+  {
     if(m_volumeSumCompute.IsResultBufferValid())
     {
       VkCommandBuffer copyCmd = m_app->createTempCmdBuffer();
@@ -1192,41 +1171,42 @@ public:
 
       if(minVolume > volume)
       {
-        minVolume  = volume;
+        minVolume    = volume;
         bestRotation = viewInvMatrix;
       }
     }
     else
     {
-	  // Note: this has to be called on next frame after rendering is done
+      // Note: this has to be called on next frame after rendering is done
       // First frame doesn't have a reference to a buffer yet
       std::cout << "invalid buffer\n\n";
     }
   }
 
-  void RunAlgorithm() {
+  void RunAlgorithm()
+  {
     if(m_algo->isAlgorithmRunning())
     {
       std::cout << "algo running...\n";
-		// notify algorithm about the result
-		m_algo->notifyAlgorithm(volume, m_camera->getRotation());
+      // notify algorithm about the result
+      m_algo->notifyAlgorithm(volume, m_camera->getRotation());
 
-		// Read another request
-		HandleAlgorithmWait();
-	}
+      // Read another request
+      HandleAlgorithmWait();
+    }
     else
     {
       if(startAlgorithm)
       {
         std::cout << "starting algo...\n";
-		// Request to start the algorithm
+        // Request to start the algorithm
         m_algo->startAlgorithm();
-		m_camera->disableInteractive();
+        m_camera->disableInteractive();
         startAlgorithm = false;
 
         HandleAlgorithmWait();
-	  }
-	}
+      }
+    }
   }
 
   void HandleAlgorithmWait()
@@ -1239,7 +1219,7 @@ public:
       m_camera->setRotation(syncData.resultRotation);
       m_algo->stopAlgorithm();
 
-	  setQuat      = false;
+      setQuat      = false;
       setPosition  = false;
       movePosition = false;
 
@@ -1278,110 +1258,112 @@ public:
     std::cout << " END\n";
   }
 
- void updateViewMatrixFromCamera()
+  void updateViewMatrixFromCamera()
   {
-   if(m_algo->isAlgorithmRunning())
-   {
-     if(setPosition)
-     {
-       m_camera->setPositionOnSphere(newPosition);
-	 }
-     else if(movePosition)
-     {
-       m_camera->move(moveDirection);
-	 }
-     else if(setQuat)
-     {
-       m_camera->setRotation(newQuat);
-	 }
-   }
+    if(m_algo->isAlgorithmRunning())
+    {
+      if(setPosition)
+      {
+        m_camera->setPositionOnSphere(newPosition);
+      }
+      else if(movePosition)
+      {
+        m_camera->move(moveDirection);
+      }
+      else if(setQuat)
+      {
+        m_camera->setRotation(newQuat);
+      }
+    }
 
     viewMatrix = m_camera->getViewMatrix();
     // std::cout << m_camera->getRoll() << "\n";
     viewInvMatrix = glm::inverse(viewMatrix);
   }
 
-  void LoadStlData(VkCommandBuffer cmd) {
-	  // Load and parse the data from file
-      if(inputs.stlFilePath == "")
+  void LoadStlData(VkCommandBuffer cmd)
+  {
+    // Load and parse the data from file
+    if(inputs.stlFilePath == "")
+    {
+      if(inputs.vertFilePath == "")
       {
-        if(inputs.vertFilePath == "")
-        {
-          std::string error = "Error: no input parameter found. Please specify either stl file path or binary vert array path.";
-          std::cout << error << "\n";
-          throw std::runtime_error(error);
-        }
-        else
-        {
-          std::ifstream vertices_stream(inputs.vertFilePath, std::ios::binary | std::ios::ate);
-          if(!vertices_stream)
-            throw new std::exception("Failed to open verts file");
-          std::streamsize        size = vertices_stream.tellg();
-          std::vector<glm::vec3> vertices(size / sizeof(glm::vec3));
-
-          vertices_stream.seekg(0, std::ios::beg);
-
-          vertices_stream.read(reinterpret_cast<char*>(vertices.data()), size);
-          vertices_stream.close();
-
-          if(inputs.indFilePath != "")
-          {
-            std::ifstream indices_stream(inputs.indFilePath, std::ios::binary | std::ios::ate);
-            if(!vertices_stream)
-              throw new std::exception("Failed to open indices file");
-            std::streamsize      size = indices_stream.tellg();
-            std::vector<int32_t> indices(size / sizeof(int32_t));
-            indices_stream.seekg(0, std::ios::beg);
-            indices_stream.read(reinterpret_cast<char*>(indices.data()), size);
-            indices_stream.close();
-            for(uint32_t i = 0; i < indices.size(); i += 3)
-            {
-              uint32_t v0, v1, v2;
-
-              openstl::Triangle t;
-              t.v0 = vertices[indices[i]];
-              t.v1 = vertices[indices[i + 1]];
-              t.v2 = vertices[indices[i + 2]];
-              triangles.push_back(t);
-            }
-          }
-          else
-          {
-            for(uint32_t i = 0; i < vertices.size(); i += 3)
-            {
-              openstl::Triangle t;
-              t.v0 = vertices[i];
-              t.v1 = vertices[i + 1];
-              t.v2 = vertices[i + 2];
-              triangles.push_back(t);
-            }
-          }
-
-          // Convert Cura Y-up to Z-up
-          for(auto& triangle : triangles)
-          {
-            std::swap(triangle.v0.y, triangle.v0.z);
-            std::swap(triangle.v1.y, triangle.v1.z);
-            std::swap(triangle.v2.y, triangle.v2.z);
-
-            triangle.v0.z = -triangle.v0.z;
-            triangle.v1.z = -triangle.v1.z;
-            triangle.v2.z = -triangle.v2.z;
-          }
-        }
+        std::string error = "Error: no input parameter found. Please specify either stl file path or binary vert array path.";
+        std::cout << error << "\n";
+        throw std::runtime_error(error);
       }
       else
       {
-        // Load triangles from the stl file
-        triangles = nvsamples::loadStlResources(inputs.stlFilePath);
-      }
+        std::ifstream vertices_stream(inputs.vertFilePath, std::ios::binary | std::ios::ate);
+        if(!vertices_stream)
+          throw new std::exception("Failed to open verts file");
+        std::streamsize        size = vertices_stream.tellg();
+        std::vector<glm::vec3> vertices(size / sizeof(glm::vec3));
 
-	  // Import the data
-      nvsamples::importStlData(m_sceneResource, triangles, m_stagingUploader);
-      auto vertices = nvsamples::exportVerticesFromStlTriangles(triangles);
-      m_aabbCompute.init(cmd, &m_allocator, std::span(aabb_compute_slang), vertices);
+        vertices_stream.seekg(0, std::ios::beg);
+
+        vertices_stream.read(reinterpret_cast<char*>(vertices.data()), size);
+        vertices_stream.close();
+
+        if(inputs.indFilePath != "")
+        {
+          std::ifstream indices_stream(inputs.indFilePath, std::ios::binary | std::ios::ate);
+          if(!vertices_stream)
+            throw new std::exception("Failed to open indices file");
+          std::streamsize      size = indices_stream.tellg();
+          std::vector<int32_t> indices(size / sizeof(int32_t));
+          indices_stream.seekg(0, std::ios::beg);
+          indices_stream.read(reinterpret_cast<char*>(indices.data()), size);
+          indices_stream.close();
+          for(uint32_t i = 0; i < indices.size(); i += 3)
+          {
+            uint32_t v0, v1, v2;
+
+            openstl::Triangle t;
+            t.v0 = vertices[indices[i]];
+            t.v1 = vertices[indices[i + 1]];
+            t.v2 = vertices[indices[i + 2]];
+            triangles.push_back(t);
+          }
+        }
+        else
+        {
+          for(uint32_t i = 0; i < vertices.size(); i += 3)
+          {
+            openstl::Triangle t;
+            t.v0 = vertices[i];
+            t.v1 = vertices[i + 1];
+            t.v2 = vertices[i + 2];
+            triangles.push_back(t);
+          }
+        }
+
+        // Convert Cura Y-up to Z-up
+        for(auto& triangle : triangles)
+        {
+          std::swap(triangle.v0.y, triangle.v0.z);
+          std::swap(triangle.v1.y, triangle.v1.z);
+          std::swap(triangle.v2.y, triangle.v2.z);
+
+          triangle.v0.z = -triangle.v0.z;
+          triangle.v1.z = -triangle.v1.z;
+          triangle.v2.z = -triangle.v2.z;
+        }
+      }
+    }
+    else
+    {
+      // Load triangles from the stl file
+      triangles = nvsamples::loadStlResources(inputs.stlFilePath);
+    }
+
+    // Import the data
+    nvsamples::importStlData(m_sceneResource, triangles, m_stagingUploader);
+    auto vertices = nvsamples::exportVerticesFromStlTriangles(triangles);
+    m_aabbCompute.init(cmd, &m_allocator, std::span(aabb_compute_slang), vertices);
   }
-  void SaveResult() {
+  void SaveResult()
+  {
     std::cout << "End...";
 
     // Save final result
@@ -1411,19 +1393,22 @@ public:
     }
   }
 
-  void setMaxResolution(VkExtent2D res) {
-	maxResolutionWidth = res.width;
-    maxResolutionHeight = res.height;
+  void setMaxResolution(VkExtent2D res)
+  {
+    maxResolutionWidth   = res.width;
+    maxResolutionHeight  = res.height;
     maxResolutionChanged = true;
   }
 
-  void setCurrentResolution(VkExtent2D res) {
+  void setCurrentResolution(VkExtent2D res)
+  {
     currentResolutionWidth   = res.width;
-    currentResolutionHeight = res.height;
+    currentResolutionHeight  = res.height;
     currentResolutionChanged = true;
   }
 
-  void updateResolution() {
+  void updateResolution()
+  {
     float width  = aabbMax.x - aabbMin.x;
     float height = aabbMax.y - aabbMin.y;
     // dynamically calculate n, m to keep fixed area size
@@ -1447,12 +1432,12 @@ public:
       }
     }
 
-	if(currentResolutionChanged || useFixedAreaResolution)
+    if(currentResolutionChanged || useFixedAreaResolution)
     {
       m_currentRenderResolution = {(unsigned int)currentResolutionWidth, (unsigned int)currentResolutionHeight};
       currentResolutionChanged  = false;
-	}
-   /*if(maxResolutionChanged)
+    }
+    /*if(maxResolutionChanged)
     {
       m_maxRenderResolution = {(unsigned int)maxResolutionWidth, (unsigned int)maxResolutionHeight};
       maxResolutionChanged  = false;
@@ -1467,23 +1452,23 @@ public:
   bool                                 hasRtx = false;
   // Algorithm
   std::unique_ptr<AlgorithmSync> m_algo;
-  bool startAlgorithm = true;
-  bool initiatedByAlgorithm = false;  // Whether to kill after algorithm finishes
+  bool                           startAlgorithm       = true;
+  bool                           initiatedByAlgorithm = false;  // Whether to kill after algorithm finishes
 
 private:
   // Set by algorithm (info for camera)
   shaderio::float2 moveDirection;
   glm::quat        newQuat;
   shaderio::float3 newPosition;
-  bool             setPosition = false;
+  bool             setPosition  = false;
   bool             setQuat      = false;
-  bool             movePosition  = false;
+  bool             movePosition = false;
 
   // Other
-  bool useFixedAreaResolution = true; // fixed width x height
-  float areaResolution         = 0.1; // used to calculate width x height
-  float maxSupportHeight = 0; // maximum support height (used to display relative colors)
-  float minCellSize = 0; // maximum area resolution (used to limit areaResolution)
+  bool  useFixedAreaResolution = true;  // fixed width x height
+  float areaResolution         = 0.1;   // used to calculate width x height
+  float maxSupportHeight       = 0;     // maximum support height (used to display relative colors)
+  float minCellSize            = 0;     // maximum area resolution (used to limit areaResolution)
 
   // Volume integration
   nvshaders::VolumeIntegrateCompute m_volumeIntegrateCompute{};
@@ -1498,9 +1483,9 @@ private:
   //float                       minVolumeFromAlgo = std::numeric_limits<float>().max();
 
   // AABB
-  nvshaders::AABBCompute      m_aabbCompute{};
-  glm::vec3                   aabbMin{-40, -40, -40};
-  glm::vec3                   aabbMax{40, 40, 40};
+  nvshaders::AABBCompute m_aabbCompute{};
+  glm::vec3              aabbMin{-40, -40, -40};
+  glm::vec3              aabbMax{40, 40, 40};
   // Used to calculate AABB
   std::vector<openstl::Triangle> triangles;
 
@@ -1511,11 +1496,11 @@ private:
   //
   int        maxResolutionWidth      = 4096;
   int        maxResolutionHeight     = 4096;
-  int        currentResolutionWidth = 1024;
+  int        currentResolutionWidth  = 1024;
   int        currentResolutionHeight = 1024;
   VkExtent2D m_maxRenderResolution{(unsigned int)maxResolutionWidth, (unsigned int)maxResolutionHeight};
   VkExtent2D m_currentRenderResolution{(unsigned int)currentResolutionWidth, (unsigned int)currentResolutionHeight};
-  bool       maxResolutionChanged = false;
+  bool       maxResolutionChanged     = false;
   bool       currentResolutionChanged = false;
 
 
@@ -1569,7 +1554,7 @@ private:
 int main(int argc, char** argv)
 {
   nvapp::ApplicationCreateInfo appInfo{};
-  GCodeOptimizer2::Inputs   inputs;
+  GCodeOptimizer2::Inputs      inputs;
 
   // Parsing the command line
   nvutils::ParameterParser   cli(nvutils::getExecutablePath().stem().string());
@@ -1611,13 +1596,12 @@ int main(int argc, char** argv)
           static VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
           static VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
           // chain feature structs if you need to enable specific feature bits via pNext
-          ci.deviceExtensions.push_back({VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accel});	// Build acceleration structures
-          ci.deviceExtensions.push_back({VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rt});			// Use vkCmdTraceRaysKHR
-          ci.deviceExtensions.push_back({VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME});			// Required by ray tracing pipeline
+          ci.deviceExtensions.push_back({VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME, &accel});  // Build acceleration structures
+          ci.deviceExtensions.push_back({VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME, &rt});  // Use vkCmdTraceRaysKHR
+          ci.deviceExtensions.push_back({VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME});  // Required by ray tracing pipeline
         }
         return true;  // continue with device creation
-      }
-  };
+      }};
   if(!appInfo.headless)
   {
     nvvk::addSurfaceExtensions(vkSetup.instanceExtensions, &vkSetup.deviceExtensions);
@@ -1663,13 +1647,13 @@ int main(int argc, char** argv)
   //algoSync.get()->startAlgorithm();
 
   // Elements added to the application
-  auto g_code_optimizer2   = std::make_shared<GCodeOptimizer2>(inputs);               // Our tutorial element
+  auto g_code_optimizer2 = std::make_shared<GCodeOptimizer2>(inputs);  // Our tutorial element
   //auto elemCamera = std::make_shared<nvapp::ElementCamera>();  // Element to control the camera movement
   auto windowTitle = std::make_shared<nvapp::ElementDefaultWindowTitle>();  // Element displaying the window title with application name and size
   auto windowMenu = std::make_shared<nvapp::ElementDefaultMenu>();  // Element displaying a menu, File->Exit ...
   //auto camManip   = tutorial->getCameraManipulator();
   //elemCamera->setCameraManipulator(camManip);
-  auto customCamera = std::make_shared<nvapp::CustomCamera>();
+  auto customCamera           = std::make_shared<nvapp::CustomCamera>();
   g_code_optimizer2->m_camera = customCamera;
   g_code_optimizer2->m_algo   = std::move(algoSync);
   g_code_optimizer2->hasRtx   = vkContext.hasExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);

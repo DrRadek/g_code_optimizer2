@@ -10,7 +10,7 @@ class UniformPointsAlgorithm : public Algorithm
 
   void algorithmLogic() override
   {
-	generateFibonacciPoints(*this, N, [this](glm::vec3 point) {
+    generateFibonacciPoints(*this, N, [this](glm::vec3 point) {
       std::cout << "requesting volume" << "\n";
       if(!requestVolumeForPosition(point))
         return false;
@@ -22,7 +22,7 @@ class UniformPointsAlgorithm : public Algorithm
         bestRotation = currentRotation;
       }
 
-	  return true;
+      return true;
     });
 
     std::cout << "Best volume is:" << bestVolume << "\n";

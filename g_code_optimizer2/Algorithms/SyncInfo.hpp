@@ -33,12 +33,12 @@ struct SyncData
 {
   // set by both
   float          result;
-  glm::quat resultRotation;
+  glm::quat      resultRotation;
   AlgorithmState state;
 
   // Set by algorithm
   shaderio::float3 newPosition;
   glm::quat        newQuat;
   shaderio::float2 moveDirection;
-  bool skipCalculation = false;
+  bool             skipCalculation = false;
 };

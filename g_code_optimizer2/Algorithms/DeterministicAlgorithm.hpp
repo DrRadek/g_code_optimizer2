@@ -13,12 +13,12 @@ class DeterministicAlgorithm : public Algorithm
 {
   // Algo parameters
   int N = 2000;  // N points to generate
-  int K = 60;  // K points to choose
+  int K = 60;    // K points to choose
 
   // Parameters for local optimization of K points
   float KPointsDeltaStart = 0.1f;
   float KPointsDeltaEnd   = 0.03f;
-  int KPointsMaxSteps   = 100;
+  int   KPointsMaxSteps   = 100;
 
   // Parameters for local optimization of last point
   float LastPointDeltaStart = 0.03f;
@@ -43,14 +43,14 @@ class DeterministicAlgorithm : public Algorithm
   {
     bool endAlgorithm = false;
 
-	// Step: 1 find best K candidates
+    // Step: 1 find best K candidates
     std::cout << "Finding best K candidates...\n";
     generateFibonacciPoints(*this, N, [this, &endAlgorithm](glm::vec3 point) {
       if(!requestVolumeForPosition(point))
       {
         endAlgorithm = true;
-		return false;
-	  }
+        return false;
+      }
 
       // Save if lowest than currently highest value
       if(bestKPoints.size() < K)
@@ -66,44 +66,44 @@ class DeterministicAlgorithm : public Algorithm
       return true;
     });
 
-	if(endAlgorithm)
+    if(endAlgorithm)
       return;
 
-	// Optimize best k
+    // Optimize best k
     std::cout << "Optimizing best K candidates...\n";
     while(!bestKPoints.empty())
     {
       PointWithInfo point = bestKPoints.top();
       bestKPoints.pop();
 
-	  // Set position to the point
+      // Set position to the point
       if(!requestVolumeForQuat(point.rotation, true))
         return;
-      currentVolume = point.volume;
+      currentVolume   = point.volume;
       currentRotation = point.rotation;
 
-	  // Run local optimizer
+      // Run local optimizer
       HookeJeeves localOptimizer = HookeJeeves(*this, KPointsDeltaStart, KPointsDeltaEnd, KPointsMaxSteps);
       if(!localOptimizer.optimize())
         return;
 
-	  float volume = localOptimizer.getBestVolume();
+      float volume = localOptimizer.getBestVolume();
 
-	  // Store if better
+      // Store if better
       if(volume < bestPoint.volume)
       {
-        bestPoint    = {volume, localOptimizer.getBestRotation()};
-	  }
+        bestPoint = {volume, localOptimizer.getBestRotation()};
+      }
     }
 
-	//// Set position to the point
+    //// Set position to the point
     std::cout << "Optimizing best candidate...\n";
     if(!requestVolumeForQuat(bestPoint.rotation, true))
       return;
     currentVolume   = bestPoint.volume;
     currentRotation = bestPoint.rotation;
 
-	// Optimize further
+    // Optimize further
     HookeJeeves localOptimizer = HookeJeeves(*this, LastPointDeltaStart, LastPointDeltaEnd, LastPointMaxSteps);
     if(!localOptimizer.optimize())
       return;

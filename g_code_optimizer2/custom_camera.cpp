@@ -2,16 +2,18 @@
 #include <iostream>
 namespace nvapp {
 
-CustomCamera::CustomCamera() {
+CustomCamera::CustomCamera()
+{
   setPositionOnSphere(-defaultForward);
 }
 
-void CustomCamera::onUIRender() {
+void CustomCamera::onUIRender()
+{
 
 
   nvutils::CameraManipulator::Inputs inputs;  // Mouse and keyboard inputs
 
-    if(!interactiveCameraEnabled)
+  if(!interactiveCameraEnabled)
     return;
 
   float wheelScrollAmount = ImGui::GetIO().MouseWheel;
@@ -20,8 +22,8 @@ void CustomCamera::onUIRender() {
     roll(wheelScrollAmount * 0.1f);
   }
 
-  bool lmb      = ImGui::IsMouseDown(ImGuiMouseButton_Left);
-  ImVec2 mousePos2 = ImGui::GetMousePos();
+  bool      lmb       = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+  ImVec2    mousePos2 = ImGui::GetMousePos();
   glm::vec2 mousePos  = {mousePos2.x, mousePos2.y};
 
   if(!lmb)
@@ -32,7 +34,7 @@ void CustomCamera::onUIRender() {
 
   if(!dragging)
   {
-    dragging = true;
+    dragging     = true;
     lastMousePos = mousePos;
     return;
   }
@@ -42,22 +44,23 @@ void CustomCamera::onUIRender() {
   lastMousePos = mousePos;
 }
 
-void CustomCamera::move(glm::vec2 direction) {
-  rotation =
-      glm::angleAxis(direction.x, glm::vec3(0, 1, 0)) *
-      glm::angleAxis(direction.y, glm::vec3(1, 0, 0)) *
-      rotation;
+void CustomCamera::move(glm::vec2 direction)
+{
+  rotation = glm::angleAxis(direction.x, glm::vec3(0, 1, 0)) * glm::angleAxis(direction.y, glm::vec3(1, 0, 0)) * rotation;
 }
 
-void CustomCamera::roll(float amount) {
+void CustomCamera::roll(float amount)
+{
   rotation = glm::angleAxis(amount, glm::vec3(0, 0, 1)) * rotation;
 }
 
-void CustomCamera::setPositionOnSphere(glm::vec3 position) {
+void CustomCamera::setPositionOnSphere(glm::vec3 position)
+{
   rotation = convertPositionToQuat(position);
 }
 
-glm::quat CustomCamera::convertPositionToQuat(glm::vec3 position) {
+glm::quat CustomCamera::convertPositionToQuat(glm::vec3 position)
+{
   glm::vec3 pos     = glm::normalize(position);
   glm::vec3 forward = -pos;
 
@@ -70,7 +73,8 @@ glm::quat CustomCamera::getQuatNoRoll(glm::quat quat)
   return glm::rotation(defaultForward, forward);
 }
 
-glm::mat4x4 CustomCamera::getViewMatrix() {
+glm::mat4x4 CustomCamera::getViewMatrix()
+{
   return glm::toMat4(rotation);
 }
 

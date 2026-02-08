@@ -11,12 +11,12 @@ public:
       , tolerance(tolerance)
       , maxSteps(maxSteps)
   {
-    baseRotation    = algo.getCurrentRotation();
-    baseVolume      = algo.getCurrentVolume();
+    baseRotation = algo.getCurrentRotation();
+    baseVolume   = algo.getCurrentVolume();
   }
 
-  bool optimize() { return runProcedure1(); }
-  float getBestVolume() { return baseVolume; }
+  bool      optimize() { return runProcedure1(); }
+  float     getBestVolume() { return baseVolume; }
   glm::quat getBestRotation() { return baseRotation; }
 
 private:
@@ -42,10 +42,11 @@ private:
   // 2) Is value better?
   //	no -> update step size/exit
   //	yes -> run procedure 2
-  bool runProcedure1() {
+  bool runProcedure1()
+  {
     while(true)
     {
-	  // Start at base position
+      // Start at base position
       currentRotation = baseRotation;
       currentVolume   = baseVolume;
       if(!algo.requestVolumeForQuat(baseRotation, false))
@@ -63,17 +64,17 @@ private:
       }
       else
       {
-		// Update step
+        // Update step
         if(deltaStep <= tolerance)
         {
           // Trigger calculation to prevent freeze
           if(!algo.requestVolumeForQuat(baseRotation))
             return false;
           return true;
-		}
+        }
 
         deltaStep *= 0.5;
-		std::cout << "delta step is:" << deltaStep << "\n";
+        std::cout << "delta step is:" << deltaStep << "\n";
       }
     }
   }
@@ -85,38 +86,40 @@ private:
   // 4) Is value better?
   //	no -> return back to procedure 1
   //	yes -> repeat
-  bool runProcedure2() {
+  bool runProcedure2()
+  {
     while(true)
     {
-	  // Update base position
+      // Update base position
       baseRotation = currentRotation;
       baseVolume   = currentVolume;
 
-	  // Pattern move
+      // Pattern move
       if(!PatternMove())
         return false;
 
-	  // Explore
-	  if(!Explore())
+      // Explore
+      if(!Explore())
         return false;
 
-	  if(currentVolume >= baseVolume)
+      if(currentVolume >= baseVolume)
       {
-		// Not better than base
-		// return back to procedure 1
-		return true;
-	  }
+        // Not better than base
+        // return back to procedure 1
+        return true;
+      }
     }
   }
 
-  bool PatternMove() {
+  bool PatternMove()
+  {
     if(!algo.requestVolumeForMove(directionVector))
       return false;
 
-	currentRotation = algo.getCurrentRotation();
-	currentVolume = algo.getCurrentVolume();
+    currentRotation = algo.getCurrentRotation();
+    currentVolume   = algo.getCurrentVolume();
 
-	return true;
+    return true;
   }
 
   bool Explore()
@@ -128,9 +131,9 @@ private:
     {
       if(!ExploreInAxis(i))
         return false;
-	}
+    }
 
-	return true;
+    return true;
   }
 
   // Helpers
@@ -139,7 +142,7 @@ private:
   {
     //auto      bestVolume   = data.currentVolume;
     glm::vec2 bestDir{0, 0};
-    glm::vec2 testingDir{0,0};
+    glm::vec2 testingDir{0, 0};
 
     // move in direction
     testingDir[axis] = deltaStep;
@@ -166,10 +169,10 @@ private:
     }
 
     // Move to the best option
-    currentVolume             = algo.getCurrentVolume();
-    currentRotation      = algo.getCurrentRotation();
-    directionVector[axis]     = testingDir[axis];
+    currentVolume         = algo.getCurrentVolume();
+    currentRotation       = algo.getCurrentRotation();
+    directionVector[axis] = testingDir[axis];
 
-	return true;
+    return true;
   }
 };
