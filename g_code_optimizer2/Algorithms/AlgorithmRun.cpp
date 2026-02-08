@@ -1,5 +1,7 @@
 
 #include "algorithmRun.hpp"
+#include "BasicAlgorithm.hpp"
+#include "DeterministicAlgorithm.hpp"
 
 void runAlgorithm(SyncInfo& syncInfo, SyncData& syncData, AlgorithmType algoType)
 {
@@ -13,6 +15,8 @@ void runAlgorithm(SyncInfo& syncInfo, SyncData& syncData, AlgorithmType algoType
     case AlgorithmType::UniformPoints:
       algo = std::make_unique<UniformPointsAlgorithm>(syncInfo, syncData);
       break;
+    case AlgorithmType::Deterministic:
+      algo = std::make_unique<DeterministicAlgorithm>(syncInfo, syncData);
     default:
       break;
   }

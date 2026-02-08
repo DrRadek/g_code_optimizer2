@@ -205,15 +205,15 @@ public:
       updateViewMatrixFromCamera();
       RecalculateAABB();
       maxSupportHeight  = glm::distance(aabbMin, aabbMax);
-      maxAreaResolution = maxSupportHeight / (float)maxResolutionHeight;
+      minCellSize = maxSupportHeight / (float)maxResolutionHeight;
 
       std::cout << "max support height: " << maxSupportHeight << "\n";
-      std::cout << "max area resolution: " << maxAreaResolution << "\n";
+      std::cout << "min cell size: " << minCellSize << "\n";
 
-      if(areaResolution > maxAreaResolution)
+      if(areaResolution < minCellSize)
       {
-        std::string error = "Error: area resolution is too big to fit in texture. Maximum resolution is "
-                            + std::to_string(maxAreaResolution) + "\n";
+        std::string error = "Error: cell size is too small to fit in texture. Min cell size is "
+                            + std::to_string(minCellSize) + "\n";
         std::cout << error;
         throw std::runtime_error(error);
       }
@@ -387,7 +387,7 @@ public:
   //---------------------------------------------------------------------------------------------------------------
   // When the viewport is resized, the GBuffer must be resized
   // - Called when the Window "viewport is resized
-  void onResize(VkCommandBuffer cmd, const VkExtent2D& size) { 
+  void onResize(VkCommandBuffer cmd, const VkExtent2D& size) {
 	  // No longer needed, viewport resolution is unrelated to render resolution
   }
 
@@ -705,7 +705,7 @@ public:
     m_sceneResource.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;   // Combine the view and projection matrices
     m_sceneResource.sceneInfo.projInvMatrix  = glm::inverse(projMatrix);  // Inverse projection matrix
     m_sceneResource.sceneInfo.viewInvMatrix  = viewInvMatrix;  // Inverse view matrix
-    m_sceneResource.sceneInfo.cameraPosition = {0, 0, 0}; // Get the camera position 
+    m_sceneResource.sceneInfo.cameraPosition = {0, 0, 0}; // Get the camera position
     m_sceneResource.sceneInfo.instances = (shaderio::GltfInstance*)m_sceneResource.bInstances.address;  // Get the address of the instance buffer
     m_sceneResource.sceneInfo.meshes = (shaderio::GltfMesh*)m_sceneResource.bMeshes.address;  // Get the address of the mesh buffer
     m_sceneResource.sceneInfo.materials = (shaderio::GltfMetallicRoughness*)m_sceneResource.bMaterials.address;  // Get the address of the material buffer
@@ -1115,7 +1115,7 @@ public:
     // Push constant information
     shaderio::RtxPushConstant pushValues{
         .sceneInfoAddress          = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,
-		.aabbMin = aabbMin, 
+		.aabbMin = aabbMin,
 		.aabbMax = aabbMax,
 		.maxSupportHeight = maxSupportHeight
     };
@@ -1205,11 +1205,9 @@ public:
   }
 
   void RunAlgorithm() {
-    float result;
-
-	std::cout << m_algo->isAlgorithmRunning() << "\n";
     if(m_algo->isAlgorithmRunning())
     {
+      std::cout << "algo running...\n";
 		// notify algorithm about the result
 		m_algo->notifyAlgorithm(volume, m_camera->getRotation());
 
@@ -1218,10 +1216,9 @@ public:
 	}
     else
     {
-      std::cout << "algo not running\n";
       if(startAlgorithm)
       {
-
+        std::cout << "starting algo...\n";
 		// Request to start the algorithm
         m_algo->startAlgorithm();
 		m_camera->disableInteractive();
@@ -1232,34 +1229,53 @@ public:
 	}
   }
 
-  void HandleAlgorithmWait() {
+  void HandleAlgorithmWait()
+  {
     auto syncData = m_algo->waitForAlgorithm();
 
-	if(syncData.state == AlgorithmState::done)
-	{
-	  m_camera->setRotation(syncData.resultRotation);
+    if(syncData.state == AlgorithmState::done)
+    {
+      std::cout << "done...\n";
+      m_camera->setRotation(syncData.resultRotation);
       m_algo->stopAlgorithm();
 
-      setPosition = false;
+	  setQuat      = false;
+      setPosition  = false;
       movePosition = false;
 
-	  if(initiatedByAlgorithm)
+      if(initiatedByAlgorithm)
       {
-		// TODO: stop
-	  }
+        // TODO: stop
+      }
       else
       {
         m_camera->enableInteractive();
-	  }
-
-	}
+      }
+    }
     else
     {
+      std::cout << "not done...\n";
       moveDirection = syncData.moveDirection;
       newPosition   = syncData.newPosition;
+      newQuat       = syncData.newQuat;
       setPosition   = syncData.state == AlgorithmState::setPosition;
+      setQuat       = syncData.state == AlgorithmState::setQuat;
       movePosition  = syncData.state == AlgorithmState::move;
-	}
+    }
+
+    if(syncData.skipCalculation)
+    {
+      // update camera
+      updateViewMatrixFromCamera();
+
+      // notify algorithm about the new camera position
+      std::cout << "notifying algorithm...\n";
+      m_algo->notifyAlgorithm(0, m_camera->getRotation());
+
+      // wait again in case of skip
+      HandleAlgorithmWait();
+    }
+    std::cout << " END\n";
   }
 
  void updateViewMatrixFromCamera()
@@ -1273,6 +1289,10 @@ public:
      else if(movePosition)
      {
        m_camera->move(moveDirection);
+	 }
+     else if(setQuat)
+     {
+       m_camera->setRotation(newQuat);
 	 }
    }
 
@@ -1453,16 +1473,18 @@ public:
 private:
   // Set by algorithm (info for camera)
   shaderio::float2 moveDirection;
+  glm::quat        newQuat;
   shaderio::float3 newPosition;
   bool             setPosition = false;
+  bool             setQuat      = false;
   bool             movePosition  = false;
 
   // Other
-  bool useFixedAreaResolution = false; // fixed width x height
-  float areaResolution         = 0; // used to calculate width x height 
+  bool useFixedAreaResolution = true; // fixed width x height
+  float areaResolution         = 0.1; // used to calculate width x height
   float maxSupportHeight = 0; // maximum support height (used to display relative colors)
-  float maxAreaResolution = 0; // maximum area resolution (used to limit areaResolution)
-  
+  float minCellSize = 0; // maximum area resolution (used to limit areaResolution)
+
   // Volume integration
   nvshaders::VolumeIntegrateCompute m_volumeIntegrateCompute{};
   // Volume calculation
@@ -1538,7 +1560,7 @@ private:
   VkPhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
 
   // Ray tracing toggle
-  bool m_useRayTracing = false;  // Set to true to use ray tracing, false for rasterization
+  bool m_useRayTracing = true;  // Set to true to use ray tracing, false for rasterization
 };
 
 

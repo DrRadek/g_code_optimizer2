@@ -23,8 +23,8 @@ public:
   void startAlgorithm() {
     stopAlgorithm();
 
-    syncInfo.syncState == SyncState::RendererDone;
-    algorithm_thread = std::thread(runAlgorithm, std::ref(syncInfo), std::ref(syncData), AlgorithmType::UniformPoints);
+    syncInfo.syncState = SyncState::RendererDone;
+    algorithm_thread = std::thread(runAlgorithm, std::ref(syncInfo), std::ref(syncData), AlgorithmType::Deterministic);
     algorithmRunning = true;
   }
 

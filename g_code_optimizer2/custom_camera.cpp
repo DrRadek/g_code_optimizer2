@@ -7,10 +7,12 @@ CustomCamera::CustomCamera() {
 }
 
 void CustomCamera::onUIRender() {
-  if(!interactiveCameraEnabled)
-    return;
+
 
   nvutils::CameraManipulator::Inputs inputs;  // Mouse and keyboard inputs
+
+    if(!interactiveCameraEnabled)
+    return;
 
   float wheelScrollAmount = ImGui::GetIO().MouseWheel;
   if(wheelScrollAmount != 0.0f)
@@ -41,9 +43,9 @@ void CustomCamera::onUIRender() {
 }
 
 void CustomCamera::move(glm::vec2 direction) {
-  rotation = 
-      glm::angleAxis(direction.x, glm::vec3(0, 1, 0)) * 
-      glm::angleAxis(direction.y, glm::vec3(1, 0, 0)) * 
+  rotation =
+      glm::angleAxis(direction.x, glm::vec3(0, 1, 0)) *
+      glm::angleAxis(direction.y, glm::vec3(1, 0, 0)) *
       rotation;
 }
 

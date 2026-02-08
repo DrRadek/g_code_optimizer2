@@ -37,11 +37,27 @@ private:
     syncInfo.cv.notify_one();
   }
 
-  void notifyRendererNewPos(shaderio::float3 newPosition)
+  void notifyRendererNewQuat(glm::quat newQuat, bool skipCalculation)
+  {
+    {
+      std::lock_guard<std::mutex> lock(syncInfo.mtx);
+      syncData.newQuat     = newQuat;
+      syncData.skipCalculation = skipCalculation;
+      std::cout << "skip calculation? : " << syncData.skipCalculation << "\n";
+
+      syncData.state     = AlgorithmState::setQuat;
+      syncInfo.syncState = SyncState::AlgorithmDone;
+    }
+    syncInfo.cv.notify_one();
+  }
+
+  void notifyRendererNewPos(shaderio::float3 newPosition, bool skipCalculation)
   {
     {
       std::lock_guard<std::mutex> lock(syncInfo.mtx);
       syncData.newPosition   = newPosition;
+      syncData.skipCalculation = skipCalculation;
+      std::cout << "skip calculation? : " << syncData.skipCalculation << "\n";
 
       syncData.state = AlgorithmState::setPosition;
       syncInfo.syncState = SyncState::AlgorithmDone;
@@ -49,11 +65,12 @@ private:
     syncInfo.cv.notify_one();
   }
 
-  void notifyRendererMoveDir(shaderio::float2 moveDirection)
+  void notifyRendererMoveDir(shaderio::float2 moveDirection, bool skipCalculation)
   {
     {
       std::lock_guard<std::mutex> lock(syncInfo.mtx);
       syncData.moveDirection = moveDirection;
+      syncData.skipCalculation = skipCalculation;
 
       syncData.state = AlgorithmState::move;
       syncInfo.syncState = SyncState::AlgorithmDone;
@@ -79,17 +96,25 @@ protected:
 
   }
 
-  // Request volume and wait for result
-  bool requestVolumeForPosition(shaderio::float3 newPosition)
+public:
+  bool requestVolumeForQuat(glm::quat newQuat, bool skipCalculation = false)
   {
-      notifyRendererNewPos(newPosition);
+    notifyRendererNewQuat(newQuat, skipCalculation);
+
+    return waitForRenderer();
+  }
+
+  // Request volume and wait for result
+  bool requestVolumeForPosition(shaderio::float3 newPosition, bool skipCalculation = false)
+  {
+      notifyRendererNewPos(newPosition, skipCalculation);
 
       return waitForRenderer();
   }
 
-  bool requestVolumeForMove(shaderio::float2 move)
+  bool requestVolumeForMove(shaderio::float2 move, bool skipCalculation = false)
   {
-    notifyRendererMoveDir(move);
+    notifyRendererMoveDir(move, skipCalculation);
 
     return waitForRenderer();
   }
@@ -101,6 +126,14 @@ protected:
 
   // Loop
   virtual void algorithmLogic() = 0;
+
+  float getCurrentVolume() {
+      return currentVolume;
+  }
+
+  glm::quat getCurrentRotation() {
+      return currentRotation;
+  }
 };
 
 class TestAlgorithm : public Algorithm

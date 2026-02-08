@@ -24,6 +24,7 @@ struct SyncInfo
 enum class AlgorithmState
 {
   setPosition,
+  setQuat,
   move,
   done
 };
@@ -37,6 +38,7 @@ struct SyncData
 
   // Set by algorithm
   shaderio::float3 newPosition;
+  glm::quat        newQuat;
   shaderio::float2 moveDirection;
+  bool skipCalculation = false;
 };
-
