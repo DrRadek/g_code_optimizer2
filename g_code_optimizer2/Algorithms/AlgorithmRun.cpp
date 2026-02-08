@@ -2,6 +2,7 @@
 #include "algorithmRun.hpp"
 #include "BasicAlgorithm.hpp"
 #include "DeterministicAlgorithm.hpp"
+#include "MonteCarloAlgorithm.hpp"
 
 void runAlgorithm(SyncInfo& syncInfo, SyncData& syncData, AlgorithmType algoType)
 {
@@ -17,8 +18,12 @@ void runAlgorithm(SyncInfo& syncInfo, SyncData& syncData, AlgorithmType algoType
       break;
     case AlgorithmType::Deterministic:
       algo = std::make_unique<DeterministicAlgorithm>(syncInfo, syncData);
-    default:
       break;
+    case AlgorithmType::MonteCarlo:
+      algo = std::make_unique<MonteCarloAlgorithm>(syncInfo, syncData);
+      break;
+    default:
+      return;
   }
 
   algo->run();

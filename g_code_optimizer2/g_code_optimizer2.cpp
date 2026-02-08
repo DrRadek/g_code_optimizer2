@@ -535,7 +535,7 @@ public:
     sceneInfo.instances = (shaderio::GltfInstance*)m_sceneResource.bInstances.address;  // Address of the instance buffer
     sceneInfo.meshes = (shaderio::GltfMesh*)m_sceneResource.bMeshes.address;            // Address of the mesh buffer
     sceneInfo.materials = (shaderio::GltfMetallicRoughness*)m_sceneResource.bMaterials.address;  // Address of the material buffer
-    sceneInfo.backgroundColor             = {1.0f, 1.0f, 1.0f};                                  // The background color
+    sceneInfo.backgroundColor             = {0.0f, 1.0f, 0.0f};                                  // The background color
     sceneInfo.numLights                   = 1;
     sceneInfo.punctualLights[0].color     = glm::vec3(1.0f, 1.0f, 1.0f);
     sceneInfo.punctualLights[0].intensity = 4.0f;
@@ -1545,7 +1545,7 @@ private:
   VkPhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
 
   // Ray tracing toggle
-  bool m_useRayTracing = true;  // Set to true to use ray tracing, false for rasterization
+  bool m_useRayTracing = false;  // Set to true to use ray tracing, false for rasterization
 };
 
 
