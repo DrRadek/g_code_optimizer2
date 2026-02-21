@@ -692,7 +692,7 @@ public:
     float     halfStepX  = 0.5f * width / float(m_currentRenderResolution.width - 1);
     float     halfStepY  = 0.5f * height / float(m_currentRenderResolution.height - 1);
     glm::mat4 projMatrix = glm::orthoRH_ZO(aabbMin.x - halfStepX, aabbMax.x + halfStepX, aabbMax.y + halfStepY,
-                                           aabbMin.y - halfStepY, -aabbMax.z - 1, -aabbMin.z - 1);
+                                           aabbMin.y - halfStepY, -aabbMax.z, -aabbMin.z);
 
     m_sceneResource.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;   // Combine the view and projection matrices
     m_sceneResource.sceneInfo.projInvMatrix  = glm::inverse(projMatrix);  // Inverse projection matrix
@@ -1344,10 +1344,6 @@ public:
           std::swap(triangle.v0.y, triangle.v0.z);
           std::swap(triangle.v1.y, triangle.v1.z);
           std::swap(triangle.v2.y, triangle.v2.z);
-
-          triangle.v0.z = -triangle.v0.z;
-          triangle.v1.z = -triangle.v1.z;
-          triangle.v2.z = -triangle.v2.z;
         }
       }
     }

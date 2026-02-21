@@ -56,6 +56,7 @@ struct TutoPushConstant
 
 // AABB
 #define AABB_SHADER_WG_SIZE 256
+static constexpr int AABB_SHADER_WG_SIZE_CPU = AABB_SHADER_WG_SIZE;
 
 struct AABB
 {

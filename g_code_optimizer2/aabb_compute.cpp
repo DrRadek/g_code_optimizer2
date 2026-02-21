@@ -16,8 +16,11 @@ VkResult nvshaders::AABBCompute::init(VkCommandBuffer               cmd,
                                       std::span<const uint32_t>     spirv,
                                       std::vector<shaderio::float3> vertices)
 {
-  auto         vertCount = vertices.size();
-  unsigned int groupSize = ceil(vertCount / 1024);
+  const auto         vertCount = vertices.size();
+
+  const unsigned ITEMS_PER_THREAD = 4;
+  const unsigned int vertsPerGroup    = shaderio::AABB_SHADER_WG_SIZE_CPU * ITEMS_PER_THREAD;
+  const unsigned int groupSize = std::max(int(std::ceil(float(vertCount) / float(vertsPerGroup))),1);
 
   assert(!m_device);
   m_alloc  = alloc;
