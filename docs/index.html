@@ -470,7 +470,7 @@ function alignRows(){
 
 // ---- UPDATE ----
 function update(){
-  const rv=tv(MODEL_VERTS,-cameraAngle);
+  const rv=tv(MODEL_VERTS,cameraAngle);
   const bb=bbof(rv);
   const dr=depthsRaster(rv,bb,NUM_SAMPLES);
   const dt=depthsRTX(rv,bb,NUM_SAMPLES);
