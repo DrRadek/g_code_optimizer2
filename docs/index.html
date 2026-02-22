@@ -161,6 +161,10 @@ const MODEL_VERTS=[[-0.72,-0.72],[0.72,-0.72],[0.72,0.72],[0.38,0.72],[0.38,-0.2
 const NUM_SAMPLES=14;
 let cameraAngle=0,dragging=false;
 
+// Fixed y-axis max for plots: diagonal of initial bounding box
+const INITIAL_BB=bbof(MODEL_VERTS);
+const PLOT_MAX=Math.sqrt(INITIAL_BB.w*INITIAL_BB.w+INITIAL_BB.h*INITIAL_BB.h);
+
 // ---- math ----
 function rot(x,y,a){return[Math.cos(a)*x-Math.sin(a)*y,Math.sin(a)*x+Math.cos(a)*y];}
 function tv(v,a){return v.map(([x,y])=>rot(x,y,a));}
@@ -358,12 +362,16 @@ function drawRTX(rv,bb){
 }
 
 // ---- BOX 5: smooth line plot ----
-function drawLinePlot(ctx,W,H,depths,col){
+function drawLinePlot(ctx,W,H,depths,col,maxD){
   clr(ctx,W,H);
-  const maxD=Math.max(...depths,.001),padX=12,padY=8;
+  const padX=12,padY=8;
   const plotW=W-padX*2,plotH=H-padY*2;
   ctx.strokeStyle='#252a35';ctx.lineWidth=1;
   ctx.beginPath();ctx.moveTo(padX,padY);ctx.lineTo(padX,H-padY);ctx.lineTo(W-padX,H-padY);ctx.stroke();
+  // dim max line
+  ctx.strokeStyle='#252a35';ctx.lineWidth=1;ctx.setLineDash([2,4]);
+  ctx.beginPath();ctx.moveTo(padX,padY);ctx.lineTo(W-padX,padY);ctx.stroke();
+  ctx.setLineDash([]);
   if(depths.every(d=>d===0)){
     ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.globalAlpha=0.4;
     ctx.beginPath();ctx.moveTo(padX,H-padY);ctx.lineTo(W-padX,H-padY);ctx.stroke();
@@ -381,14 +389,18 @@ function drawLinePlot(ctx,W,H,depths,col){
 }
 
 // ---- BOX 6: integration step function ----
-function drawInteg(ctx,W,H,depths,bb,col){
+function drawInteg(ctx,W,H,depths,bb,col,maxD){
   clr(ctx,W,H);
   const avgs=[];
   for(let i=0;i<depths.length-1;i++)avgs.push((depths[i]+depths[i+1])/2);
-  const maxD=Math.max(...avgs,.001),padX=12,padY=8,botP=18;
+  const padX=12,padY=8,botP=18;
   const plotW=W-padX*2,plotH=H-padY-botP;
   ctx.strokeStyle='#252a35';ctx.lineWidth=1;
   ctx.beginPath();ctx.moveTo(padX,padY);ctx.lineTo(padX,H-botP);ctx.lineTo(W-padX,H-botP);ctx.stroke();
+  // dim max line
+  ctx.setLineDash([2,4]);
+  ctx.beginPath();ctx.moveTo(padX,padY);ctx.lineTo(W-padX,padY);ctx.stroke();
+  ctx.setLineDash([]);
   if(avgs.every(d=>d===0)){
     ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.globalAlpha=0.4;
     ctx.beginPath();ctx.moveTo(padX,H-botP);ctx.lineTo(W-padX,H-botP);ctx.stroke();
@@ -478,10 +490,10 @@ function update(){
 
   drawModel();drawView(rv);drawBB(rv);
   drawRaster(rv,bb);drawRTX(rv,bb);
-  drawLinePlot(document.getElementById('c-plot-raster').getContext('2d'),196,120,dr,'#00d4ff');
-  drawLinePlot(document.getElementById('c-plot-rtx').getContext('2d'),196,120,dt,'#ff6b35');
-  drawInteg(document.getElementById('c-integ-raster').getContext('2d'),236,150,dr,bb,'#00d4ff');
-  drawInteg(document.getElementById('c-integ-rtx').getContext('2d'),236,150,dt,bb,'#ff6b35');
+  drawLinePlot(document.getElementById('c-plot-raster').getContext('2d'),196,120,dr,'#00d4ff',PLOT_MAX);
+  drawLinePlot(document.getElementById('c-plot-rtx').getContext('2d'),196,120,dt,'#ff6b35',PLOT_MAX);
+  drawInteg(document.getElementById('c-integ-raster').getContext('2d'),236,150,dr,bb,'#00d4ff',PLOT_MAX);
+  drawInteg(document.getElementById('c-integ-rtx').getContext('2d'),236,150,dt,bb,'#ff6b35',PLOT_MAX);
 
   document.getElementById('angle-display').textContent=(cameraAngle*180/Math.PI).toFixed(1)+'°';
   document.getElementById('final-raster').textContent=ir.toFixed(4);
