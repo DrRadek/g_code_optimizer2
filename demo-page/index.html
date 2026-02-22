@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3D Print Orientation Optimizer — Pipeline Demo</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600&family=Syne:wght@400;600;800&display=swap');
+  :root{--bg:#0a0c0f;--surface:#111318;--surface2:#181c24;--border:#252a35;--accent:#00d4ff;--accent2:#ff6b35;--green:#00ff88;--red:#ff3b5c;--text:#e0e6f0;--text-dim:#5a6480;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{background:var(--bg);color:var(--text);font-family:'JetBrains Mono',monospace;min-height:100vh;overflow-x:auto;}
+  header{padding:20px 40px;border-bottom:1px solid var(--border);display:flex;align-items:baseline;gap:20px;}
+  header h1{font-family:'Syne',sans-serif;font-size:18px;font-weight:800;letter-spacing:.05em;color:var(--accent);}
+  header span{font-size:11px;color:var(--text-dim);letter-spacing:.1em;}
+  .pipeline{display:flex;align-items:flex-start;padding:40px;overflow-x:auto;min-width:max-content;}
+  .box{flex-shrink:0;width:260px;background:var(--surface);border:1px solid var(--border);border-radius:8px;overflow:hidden;}
+  .box.narrow{width:220px;}
+  .box-header{padding:10px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;background:var(--surface2);}
+  .box-num{width:20px;height:20px;border-radius:4px;background:var(--accent);color:var(--bg);font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+  .box-num.alt{background:var(--accent2);}
+  .box-num.green{background:var(--green);color:#000;}
+  .box-title{font-size:11px;font-weight:600;letter-spacing:.08em;color:var(--text);text-transform:uppercase;}
+  .box-body{padding:12px;}
+  canvas{display:block;border-radius:4px;background:#0d1117;border:1px solid var(--border);}
+  .hint{font-size:10px;color:var(--text-dim);margin-top:7px;letter-spacing:.05em;line-height:1.5;}
+  .vdisplay{background:#0d1117;border:1px solid var(--border);border-radius:4px;padding:7px 12px;font-size:11px;color:var(--accent);margin-top:8px;}
+  .vdisplay span{color:var(--text-dim);font-size:10px;}
+  .fval{background:#0d1117;border:1px solid var(--green);border-radius:6px;padding:14px;text-align:center;margin-bottom:8px;}
+  .fval .lbl{font-size:10px;color:var(--text-dim);letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;}
+  .fval .num{font-size:26px;font-weight:600;color:var(--green);font-family:'Syne',sans-serif;}
+  .fval.alt{border-color:var(--accent2);}
+  .fval.alt .num{color:var(--accent2);}
+  .split-group{display:flex;flex-direction:column;gap:14px;}
+  .cam-angle{font-size:10px;color:var(--text-dim);margin-top:6px;}
+  .cam-angle strong{color:var(--accent);font-size:12px;}
+  .diff-note{font-size:10px;color:var(--text-dim);margin-top:8px;line-height:1.6;}
+  .diff-note b{color:var(--accent2);}
+</style>
+</head>
+<body>
+<header>
+  <h1>ORIENTATION OPTIMIZER</h1>
+  <span>3D PRINT SUPPORT VOLUME PIPELINE — INTERACTIVE DEMO</span>
+</header>
+
+<div class="pipeline" id="pipeline">
+
+  <div class="box" id="b1">
+    <div class="box-header"><div class="box-num">1</div><div class="box-title">Model Space</div></div>
+    <div class="box-body">
+      <canvas id="c-model" width="236" height="220"></canvas>
+      <div class="cam-angle">Camera angle: <strong id="angle-display">0.0°</strong></div>
+      <div class="hint">↺ Drag the orange handle to rotate camera</div>
+    </div>
+  </div>
+
+  <svg id="sv12" style="flex-shrink:0;overflow:visible" width="32" height="10"></svg>
+
+  <div class="box" id="b2">
+    <div class="box-header"><div class="box-num">2</div><div class="box-title">View Space</div></div>
+    <div class="box-body">
+      <canvas id="c-view" width="236" height="220"></canvas>
+      <div class="hint">Camera fixed at top — model rotated</div>
+    </div>
+  </div>
+
+  <svg id="sv23" style="flex-shrink:0;overflow:visible" width="32" height="10"></svg>
+
+  <div class="box" id="b3">
+    <div class="box-header"><div class="box-num">3</div><div class="box-title">Bounding Box</div></div>
+    <div class="box-body">
+      <canvas id="c-bbox" width="236" height="220"></canvas>
+      <div class="vdisplay" id="bbox-display"><span>w</span> — &nbsp;<span>h</span> —</div>
+      <div class="hint">Ray bounds — orthographic projection</div>
+    </div>
+  </div>
+
+  <svg id="sv-split" style="flex-shrink:0;overflow:visible" width="32" height="10"></svg>
+
+  <div class="split-group" id="sg4">
+    <div class="box" id="b4a">
+      <div class="box-header"><div class="box-num">4a</div><div class="box-title">Rasterization</div></div>
+      <div class="box-body">
+        <canvas id="c-raster" width="236" height="190"></canvas>
+        <div class="hint">Camera at top → rays downward<br>Green = support column height (hit → bbox bottom)</div>
+      </div>
+    </div>
+    <div class="box" id="b4b">
+      <div class="box-header"><div class="box-num alt">4b</div><div class="box-title">Ray Tracing</div></div>
+      <div class="box-body">
+        <canvas id="c-rtx" width="236" height="190"></canvas>
+        <div class="hint">Camera at top → rays downward<br><span style="color:#ff3b5c">●</span> 1st hit ignored &nbsp;<span style="color:#00ff88">●</span> 2nd hit = bottom surface</div>
+      </div>
+    </div>
+  </div>
+
+  <svg id="sv-mid" style="flex-shrink:0;overflow:visible" width="32" height="10"></svg>
+
+  <div class="split-group" id="sg5">
+    <div class="box narrow" id="b5a">
+      <div class="box-header"><div class="box-num">5a</div><div class="box-title">Column Heights</div></div>
+      <div class="box-body">
+        <canvas id="c-plot-raster" width="196" height="120"></canvas>
+        <div class="hint">Rasterizer — support column per ray</div>
+      </div>
+    </div>
+    <div class="box narrow" id="b5b">
+      <div class="box-header"><div class="box-num alt">5b</div><div class="box-title">Column Heights</div></div>
+      <div class="box-body">
+        <canvas id="c-plot-rtx" width="196" height="120"></canvas>
+        <div class="hint">Ray tracer — support column per ray</div>
+      </div>
+    </div>
+  </div>
+
+  <svg id="sv-mid2" style="flex-shrink:0;overflow:visible" width="32" height="10"></svg>
+
+  <div class="split-group" id="sg6">
+    <div class="box" id="b6a">
+      <div class="box-header"><div class="box-num green">6a</div><div class="box-title">Integration (Raster)</div></div>
+      <div class="box-body">
+        <canvas id="c-integ-raster" width="236" height="150"></canvas>
+        <div class="hint">Δx·(h[i]+h[i+1])/2 per interval</div>
+      </div>
+    </div>
+    <div class="box" id="b6b">
+      <div class="box-header"><div class="box-num green" style="background:var(--accent2);color:#000">6b</div><div class="box-title">Integration (RTX)</div></div>
+      <div class="box-body">
+        <canvas id="c-integ-rtx" width="236" height="150"></canvas>
+        <div class="hint">Δx·(h[i]+h[i+1])/2 per interval</div>
+      </div>
+    </div>
+  </div>
+
+  <svg id="sv-merge" style="flex-shrink:0;overflow:visible" width="32" height="10"></svg>
+
+  <div class="box narrow" id="b7">
+    <div class="box-header"><div class="box-num green">7</div><div class="box-title">Result</div></div>
+    <div class="box-body">
+      <div class="fval">
+        <div class="lbl">Raster volume</div>
+        <div class="num" id="final-raster">0.0000</div>
+      </div>
+      <div class="fval alt">
+        <div class="lbl">RTX volume</div>
+        <div class="num" id="final-rtx">0.0000</div>
+      </div>
+      <div class="diff-note">
+        Δ = <b id="final-diff">0.0000</b><br>
+        ≈ model volume (constant)<br>
+        Both rank identically
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// U-shape polygon
+const MODEL_VERTS=[[-0.72,-0.72],[0.72,-0.72],[0.72,0.72],[0.38,0.72],[0.38,-0.22],[-0.38,-0.22],[-0.38,0.72],[-0.72,0.72]];
+const NUM_SAMPLES=14;
+let cameraAngle=0,dragging=false;
+
+// ---- math ----
+function rot(x,y,a){return[Math.cos(a)*x-Math.sin(a)*y,Math.sin(a)*x+Math.cos(a)*y];}
+function tv(v,a){return v.map(([x,y])=>rot(x,y,a));}
+function bbof(v){let x0=1e9,x1=-1e9,y0=1e9,y1=-1e9;for(const[x,y]of v){x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);}return{minX:x0,maxX:x1,minY:y0,maxY:y1,w:x1-x0,h:y1-y0};}
+
+// vertical ray hits at x, sorted descending (top first)
+function yhits(verts,x){
+  const h=[];const n=verts.length;
+  for(let j=0;j<n;j++){
+    const[x0,y0]=verts[j],[x1,y1]=verts[(j+1)%n];
+    if((x0<x&&x<=x1)||(x1<x&&x<=x0))h.push(y0+(x-x0)/(x1-x0)*(y1-y0));
+  }
+  return h.sort((a,b)=>b-a);
+}
+
+// Rays placed at BOUNDARY positions: x = minX + i/(n-1)*w for i=0..n-1
+// This gives n rays spanning exactly [minX, maxX], correct for trapezoidal rule:
+// integral ≈ sum_{i=0}^{n-2} (h[i]+h[i+1])/2 * dx, where dx = w/(n-1)
+function rayXPositions(bb, n) {
+  const eps = bb.w * 1e-6;
+  return Array.from({length: n}, (_, i) => bb.minX + eps + i / (n - 1) * (bb.w - 2 * eps));
+}
+
+// 4a: support column height = topSurface - bbox.minY
+function depthsRaster(rv,bb,n){
+  const xs=rayXPositions(bb,n);
+  return xs.map(x=>{
+    const h=yhits(rv,x);
+    return h.length>=1?Math.max(0,h[0]-bb.minY):0;
+  });
+}
+
+// 4b: RTX support column = sum of exterior segment lengths below first hit
+// After ignoring hit[0] (top surface), pairs are: [1,2]=inside, [2,3]=outside, [3,4]=inside...
+// Exterior gaps below first hit contribute to support volume.
+// Also add the segment from last hit to bbox.minY if we're outside at that point.
+function depthsRTX(rv,bb,n){
+  const xs=rayXPositions(bb,n);
+  return xs.map(x=>{
+    const h=yhits(rv,x); // sorted descending (top first)
+    if(h.length<2)return 0;
+    let depth=0;
+    // segments after first hit: k=1 is inside (between h[0] and h[1]),
+    // k=2 is outside (between h[1] and h[2]), etc.
+    // outside segments: k even (0-indexed from after first hit) = indices [k, k+1] where k>=1 and k is odd
+    for(let k=1;k<h.length;k++){
+      const outside=(k%2===0); // k=2,4,6... are outside segments
+      if(outside) depth+=h[k-1]-h[k];
+    }
+    // below last hit: outside if h.length is even (odd number of segments after first hit)
+    const outsideBelow=(h.length%2===0);
+    if(outsideBelow) depth+=h[h.length-1]-bb.minY;
+    return Math.max(0,depth);
+  });
+}
+
+// Trapezoidal rule: sum (h[i]+h[i+1])/2 * dx, dx = w/(n-1)
+function trapInt(depths,bb){
+  const dx=bb.w/(depths.length-1);
+  let s=0;
+  for(let i=0;i<depths.length-1;i++)s+=(depths[i]+depths[i+1])/2*dx;
+  return s;
+}
+
+// ---- canvas helpers ----
+function clr(ctx,w,h){ctx.fillStyle='#0d1117';ctx.fillRect(0,0,w,h);}
+function grd(ctx,w,h){ctx.strokeStyle='#12181f';ctx.lineWidth=1;for(let x=0;x<w;x+=20){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}for(let y=0;y<h;y+=20){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}}
+function m2c(x,y,cx,cy,sc){return[cx+x*sc,cy-y*sc];}
+function dpoly(ctx,v,cx,cy,sc,fill,stroke){ctx.beginPath();const[sx,sy]=m2c(v[0][0],v[0][1],cx,cy,sc);ctx.moveTo(sx,sy);for(let i=1;i<v.length;i++){const[px,py]=m2c(v[i][0],v[i][1],cx,cy,sc);ctx.lineTo(px,py);}ctx.closePath();if(fill){ctx.fillStyle=fill;ctx.fill();}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=1.5;ctx.stroke();}}
+function darrow(ctx,x1,y1,x2,y2,col){const a=Math.atan2(y2-y1,x2-x1);ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.beginPath();ctx.moveTo(x1,y1);ctx.lineTo(x2,y2);ctx.stroke();ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(x2,y2);ctx.lineTo(x2-8*Math.cos(a-.35),y2-8*Math.sin(a-.35));ctx.lineTo(x2-8*Math.cos(a+.35),y2-8*Math.sin(a+.35));ctx.closePath();ctx.fill();}
+function fit(bb,W,H,px,py){const sc=Math.min((W-px*2)/bb.w,(H-py*2)/bb.h)*.88;return{sc,cx:W/2-(bb.minX+bb.w/2)*sc,cy:H/2+(bb.minY+bb.h/2)*sc};}
+function h2r(h,a){const r=parseInt(h.slice(1,3),16),g=parseInt(h.slice(3,5),16),b=parseInt(h.slice(5,7),16);return`rgba(${r},${g},${b},${a})`;}
+
+// ---- SVG connector helpers ----
+function svline(svg,x1,y1,x2,y2){const l=document.createElementNS('http://www.w3.org/2000/svg','line');l.setAttribute('x1',x1);l.setAttribute('y1',y1);l.setAttribute('x2',x2);l.setAttribute('y2',y2);l.setAttribute('stroke','#252a35');l.setAttribute('stroke-width','2');svg.appendChild(l);}
+function svarrow(svg,x,y){const p=document.createElementNS('http://www.w3.org/2000/svg','polygon');p.setAttribute('points',`${x-8},${y-4} ${x},${y} ${x-8},${y+4}`);p.setAttribute('fill','#252a35');svg.appendChild(p);}
+
+// ---- BOX 1 ----
+const c1=document.getElementById('c-model'),ctx1=c1.getContext('2d');
+const W1=c1.width,H1=c1.height,CX1=W1/2,CY1=H1/2+10,SC1=90,CR=92;
+function drawModel(){
+  clr(ctx1,W1,H1);grd(ctx1,W1,H1);
+  const[,bpy]=m2c(0,-1,CX1,CY1,SC1);
+  ctx1.fillStyle='#1a2030';ctx1.fillRect(10,bpy+2,W1-20,8);
+  dpoly(ctx1,MODEL_VERTS,CX1,CY1,SC1,'rgba(0,212,255,0.07)','#00d4ff');
+  const hx=Math.sin(cameraAngle)*CR,hy=-Math.cos(cameraAngle)*CR;
+  const cx2=CX1+hx,cy2=CY1+hy;
+  ctx1.strokeStyle='rgba(255,107,53,0.25)';ctx1.lineWidth=1;ctx1.setLineDash([4,4]);
+  ctx1.beginPath();ctx1.moveTo(CX1,CY1);ctx1.lineTo(cx2,cy2);ctx1.stroke();ctx1.setLineDash([]);
+  darrow(ctx1,CX1,CY1,cx2,cy2,'#ff6b35');
+  ctx1.beginPath();ctx1.arc(cx2,cy2,9,0,Math.PI*2);ctx1.fillStyle='#ff6b35';ctx1.fill();
+  ctx1.strokeStyle='rgba(255,255,255,0.15)';ctx1.lineWidth=1;ctx1.stroke();
+  ctx1.fillStyle='#fff';ctx1.font='9px JetBrains Mono';ctx1.textAlign='center';ctx1.textBaseline='middle';ctx1.fillText('C',cx2,cy2);
+  ctx1.textAlign='left';ctx1.textBaseline='alphabetic';
+  ctx1.fillStyle='#ff6b35';ctx1.font='9px JetBrains Mono';ctx1.fillText('CAM',cx2+12,cy2-4);
+}
+
+// ---- BOX 2 ----
+const c2=document.getElementById('c-view'),ctx2=c2.getContext('2d');
+function drawView(rv){
+  clr(ctx2,c2.width,c2.height);grd(ctx2,c2.width,c2.height);
+  const bb=bbof(rv),{sc,cx,cy}=fit(bb,c2.width,c2.height,20,28);
+  const[,bpy]=m2c(0,bb.minY,cx,cy,sc);
+  ctx2.fillStyle='#1a2030';ctx2.fillRect(10,bpy+2,c2.width-20,8);
+  dpoly(ctx2,rv,cx,cy,sc,'rgba(0,212,255,0.07)','#00d4ff');
+  const[,ty]=m2c(0,bb.maxY,cx,cy,sc);
+  ctx2.fillStyle='#ff6b35';ctx2.font='9px JetBrains Mono';ctx2.textAlign='center';
+  ctx2.fillText('▼ CAM',c2.width/2,ty-14);
+  darrow(ctx2,c2.width/2,ty-12,c2.width/2,ty-2,'#ff6b35');
+  ctx2.textAlign='left';
+}
+
+// ---- BOX 3 ----
+const c3=document.getElementById('c-bbox'),ctx3=c3.getContext('2d');
+function drawBB(rv){
+  clr(ctx3,c3.width,c3.height);grd(ctx3,c3.width,c3.height);
+  const bb=bbof(rv),{sc,cx,cy}=fit(bb,c3.width,c3.height,20,28);
+  dpoly(ctx3,rv,cx,cy,sc,'rgba(0,212,255,0.07)','#00d4ff');
+  const[bx0,by0]=m2c(bb.minX,bb.maxY,cx,cy,sc),[bx1,by1]=m2c(bb.maxX,bb.minY,cx,cy,sc);
+  ctx3.strokeStyle='#ff6b35';ctx3.lineWidth=1;ctx3.setLineDash([4,3]);
+  ctx3.strokeRect(bx0,by0,bx1-bx0,by1-by0);ctx3.setLineDash([]);
+  ctx3.fillStyle='#ff6b35';ctx3.font='9px JetBrains Mono';
+  ctx3.fillText(`w=${bb.w.toFixed(2)}`,bx0+3,by1+13);ctx3.fillText(`h=${bb.h.toFixed(2)}`,bx1+4,(by0+by1)/2+4);
+  document.getElementById('bbox-display').innerHTML=`<span>w</span> ${bb.w.toFixed(3)} &nbsp;<span>h</span> ${bb.h.toFixed(3)}`;
+}
+
+// ---- BOX 4a ----
+const c4a=document.getElementById('c-raster'),ctx4a=c4a.getContext('2d');
+function drawRaster(rv,bb){
+  clr(ctx4a,c4a.width,c4a.height);grd(ctx4a,c4a.width,c4a.height);
+  const{sc,cx,cy}=fit(bb,c4a.width,c4a.height,14,22);
+  dpoly(ctx4a,rv,cx,cy,sc,'rgba(0,212,255,0.07)','#00d4ff');
+  const[bx0,by0]=m2c(bb.minX,bb.maxY,cx,cy,sc),[bx1,by1]=m2c(bb.maxX,bb.minY,cx,cy,sc);
+  ctx4a.strokeStyle='rgba(255,107,53,0.2)';ctx4a.lineWidth=1;ctx4a.setLineDash([3,3]);
+  ctx4a.strokeRect(bx0,by0,bx1-bx0,by1-by0);ctx4a.setLineDash([]);
+  const xs=rayXPositions(bb,NUM_SAMPLES);
+  for(const x of xs){
+    const[cxr]=m2c(x,0,cx,cy,sc);
+    const[,rTop]=m2c(0,bb.maxY,cx,cy,sc),[,rBot]=m2c(0,bb.minY,cx,cy,sc);
+    const h=yhits(rv,x);
+    if(h.length>=1){
+      const[,tsY]=m2c(0,h[0],cx,cy,sc);
+      ctx4a.strokeStyle='rgba(255,107,53,0.3)';ctx4a.lineWidth=1;
+      ctx4a.beginPath();ctx4a.moveTo(cxr,rTop);ctx4a.lineTo(cxr,tsY);ctx4a.stroke();
+      ctx4a.beginPath();ctx4a.arc(cxr,tsY,2.5,0,Math.PI*2);ctx4a.fillStyle='#ff3b5c';ctx4a.fill();
+      ctx4a.strokeStyle='rgba(0,255,136,0.8)';ctx4a.lineWidth=1.5;
+      ctx4a.beginPath();ctx4a.moveTo(cxr,tsY);ctx4a.lineTo(cxr,rBot);ctx4a.stroke();
+    } else {
+      ctx4a.strokeStyle='rgba(100,140,200,0.12)';ctx4a.lineWidth=1;
+      ctx4a.beginPath();ctx4a.moveTo(cxr,rTop);ctx4a.lineTo(cxr,rBot);ctx4a.stroke();
+    }
+  }
+  ctx4a.fillStyle='#ff6b35';ctx4a.font='9px JetBrains Mono';ctx4a.textAlign='center';
+  ctx4a.fillText('▼ CAM',c4a.width/2,10);ctx4a.textAlign='left';
+  ctx4a.fillStyle='#ff3b5c';ctx4a.fillText('● entry',6,c4a.height-12);
+  ctx4a.fillStyle='#00ff88';ctx4a.fillText('█ support col.',60,c4a.height-12);
+}
+
+// ---- BOX 4b ----
+const c4b=document.getElementById('c-rtx'),ctx4b=c4b.getContext('2d');
+function drawRTX(rv,bb){
+  clr(ctx4b,c4b.width,c4b.height);grd(ctx4b,c4b.width,c4b.height);
+  const{sc,cx,cy}=fit(bb,c4b.width,c4b.height,14,22);
+  dpoly(ctx4b,rv,cx,cy,sc,'rgba(0,212,255,0.07)','#00d4ff');
+  const[bx0,by0]=m2c(bb.minX,bb.maxY,cx,cy,sc),[bx1,by1]=m2c(bb.maxX,bb.minY,cx,cy,sc);
+  ctx4b.strokeStyle='rgba(255,107,53,0.2)';ctx4b.lineWidth=1;ctx4b.setLineDash([3,3]);
+  ctx4b.strokeRect(bx0,by0,bx1-bx0,by1-by0);ctx4b.setLineDash([]);
+  const xs=rayXPositions(bb,NUM_SAMPLES);
+  for(const x of xs){
+    const[cxr]=m2c(x,0,cx,cy,sc);
+    const[,rTop]=m2c(0,bb.maxY,cx,cy,sc),[,rBot]=m2c(0,bb.minY,cx,cy,sc);
+    const h=yhits(rv,x);
+    if(h.length===0){ctx4b.strokeStyle='rgba(100,140,200,0.1)';ctx4b.lineWidth=1;ctx4b.beginPath();ctx4b.moveTo(cxr,rTop);ctx4b.lineTo(cxr,rBot);ctx4b.stroke();continue;}
+    const[,h0y]=m2c(0,h[0],cx,cy,sc);
+    ctx4b.strokeStyle='rgba(255,107,53,0.35)';ctx4b.lineWidth=1;
+    ctx4b.beginPath();ctx4b.moveTo(cxr,rTop);ctx4b.lineTo(cxr,h0y);ctx4b.stroke();
+    ctx4b.beginPath();ctx4b.arc(cxr,h0y,3,0,Math.PI*2);ctx4b.fillStyle='#ff3b5c';ctx4b.fill();
+    for(let k=1;k<h.length;k++){
+      const[,hy]=m2c(0,h[k],cx,cy,sc),[,hpy]=m2c(0,h[k-1],cx,cy,sc);
+      const inside=(k%2===1);
+      ctx4b.strokeStyle=inside?'rgba(100,140,200,0.3)':'rgba(0,255,136,0.7)';
+      ctx4b.lineWidth=inside?1:1.5;
+      ctx4b.beginPath();ctx4b.moveTo(cxr,hpy);ctx4b.lineTo(cxr,hy);ctx4b.stroke();
+      ctx4b.beginPath();ctx4b.arc(cxr,hy,2.5,0,Math.PI*2);
+      ctx4b.fillStyle=inside?'#ff3b5c':'#00ff88';ctx4b.fill();
+    }
+    const lk=h.length-1;const[,lhy]=m2c(0,h[lk],cx,cy,sc);
+    const outsideBelow=(lk%2===1);
+    ctx4b.strokeStyle=outsideBelow?'rgba(0,255,136,0.55)':'rgba(100,140,200,0.15)';
+    ctx4b.lineWidth=outsideBelow?1.5:1;
+    ctx4b.beginPath();ctx4b.moveTo(cxr,lhy);ctx4b.lineTo(cxr,rBot);ctx4b.stroke();
+  }
+  ctx4b.fillStyle='#ff6b35';ctx4b.font='9px JetBrains Mono';ctx4b.textAlign='center';
+  ctx4b.fillText('▼ CAM',c4b.width/2,10);ctx4b.textAlign='left';
+}
+
+// ---- BOX 5: smooth line plot ----
+function drawLinePlot(ctx,W,H,depths,col){
+  clr(ctx,W,H);
+  const maxD=Math.max(...depths,.001),padX=12,padY=8;
+  const plotW=W-padX*2,plotH=H-padY*2;
+  ctx.strokeStyle='#252a35';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(padX,padY);ctx.lineTo(padX,H-padY);ctx.lineTo(W-padX,H-padY);ctx.stroke();
+  if(depths.every(d=>d===0)){
+    ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.globalAlpha=0.4;
+    ctx.beginPath();ctx.moveTo(padX,H-padY);ctx.lineTo(W-padX,H-padY);ctx.stroke();
+    ctx.globalAlpha=1;return;
+  }
+  const n=depths.length;
+  ctx.beginPath();ctx.moveTo(padX,H-padY);
+  for(let i=0;i<n;i++){const x=padX+i/(n-1)*plotW,y=H-padY-(depths[i]/maxD)*plotH;ctx.lineTo(x,y);}
+  ctx.lineTo(W-padX,H-padY);ctx.closePath();
+  ctx.fillStyle=h2r(col,.13);ctx.fill();
+  ctx.beginPath();
+  for(let i=0;i<n;i++){const x=padX+i/(n-1)*plotW,y=H-padY-(depths[i]/maxD)*plotH;i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}
+  ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.stroke();
+  for(let i=0;i<n;i++){const x=padX+i/(n-1)*plotW,y=H-padY-(depths[i]/maxD)*plotH;ctx.beginPath();ctx.arc(x,y,2.5,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();}
+}
+
+// ---- BOX 6: integration step function ----
+function drawInteg(ctx,W,H,depths,bb,col){
+  clr(ctx,W,H);
+  const avgs=[];
+  for(let i=0;i<depths.length-1;i++)avgs.push((depths[i]+depths[i+1])/2);
+  const maxD=Math.max(...avgs,.001),padX=12,padY=8,botP=18;
+  const plotW=W-padX*2,plotH=H-padY-botP;
+  ctx.strokeStyle='#252a35';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(padX,padY);ctx.lineTo(padX,H-botP);ctx.lineTo(W-padX,H-botP);ctx.stroke();
+  if(avgs.every(d=>d===0)){
+    ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.globalAlpha=0.4;
+    ctx.beginPath();ctx.moveTo(padX,H-botP);ctx.lineTo(W-padX,H-botP);ctx.stroke();
+    ctx.globalAlpha=1;
+    ctx.fillStyle=col;ctx.font='10px JetBrains Mono';ctx.fillText('∫ = 0.0000',padX+2,H-4);
+    return;
+  }
+  const n=avgs.length,sw=plotW/n;
+  for(let i=0;i<n;i++){
+    const x0=padX+i*sw,bh=(avgs[i]/maxD)*plotH,y0=H-botP-bh;
+    ctx.fillStyle=h2r(col,.13);ctx.fillRect(x0,y0,sw,bh);
+    ctx.strokeStyle=col;ctx.lineWidth=1.5;
+    ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x0+sw,y0);ctx.stroke();
+    if(i>0){const ph=(avgs[i-1]/maxD)*plotH,py=H-botP-ph;ctx.beginPath();ctx.moveTo(x0,py);ctx.lineTo(x0,y0);ctx.stroke();}
+    ctx.beginPath();ctx.arc(x0+sw/2,y0,2.5,0,Math.PI*2);ctx.fillStyle=col;ctx.fill();
+  }
+  const integral=trapInt(depths,bb);
+  ctx.fillStyle=col;ctx.font='10px JetBrains Mono';
+  ctx.fillText(`∫ = ${integral.toFixed(4)}`,padX+2,H-4);
+}
+
+// ---- CONNECTORS ----
+function centerOf(el){
+  const pr=document.getElementById('pipeline').getBoundingClientRect(),er=el.getBoundingClientRect();
+  return er.top-pr.top+er.height/2;
+}
+function simpleSV(svgEl,b1,b2){
+  const y=(centerOf(b1)+centerOf(b2))/2;
+  svgEl.setAttribute('height',Math.max(y+10,20));svgEl.innerHTML='';
+  svline(svgEl,0,y,28,y);svarrow(svgEl,32,y);
+}
+function buildConnectors(){
+  simpleSV(document.getElementById('sv12'),document.getElementById('b1'),document.getElementById('b2'));
+  simpleSV(document.getElementById('sv23'),document.getElementById('b2'),document.getElementById('b3'));
+
+  // split: b3 → b4a + b4b
+  {const sv=document.getElementById('sv-split');
+  const y3=centerOf(document.getElementById('b3'));
+  const y4a=centerOf(document.getElementById('b4a'));
+  const y4b=centerOf(document.getElementById('b4b'));
+  const H=Math.max(y3,y4a,y4b)+10;sv.setAttribute('height',H);sv.innerHTML='';
+  svline(sv,0,y3,16,y3);svline(sv,16,Math.min(y4a,y3),16,Math.max(y4b,y3));
+  svline(sv,16,y4a,32,y4a);svarrow(sv,32,y4a);
+  svline(sv,16,y4b,32,y4b);svarrow(sv,32,y4b);}
+
+  // straight: 4a→5a, 4b→5b
+  {const sv=document.getElementById('sv-mid');
+  const y4a=centerOf(document.getElementById('b4a')),y4b=centerOf(document.getElementById('b4b'));
+  const y5a=centerOf(document.getElementById('b5a')),y5b=centerOf(document.getElementById('b5b'));
+  const H=Math.max(y4a,y4b,y5a,y5b)+10;sv.setAttribute('height',H);sv.innerHTML='';
+  svline(sv,0,y4a,28,y5a);svarrow(sv,32,y5a);
+  svline(sv,0,y4b,28,y5b);svarrow(sv,32,y5b);}
+
+  // straight: 5a→6a, 5b→6b
+  {const sv=document.getElementById('sv-mid2');
+  const y5a=centerOf(document.getElementById('b5a')),y5b=centerOf(document.getElementById('b5b'));
+  const y6a=centerOf(document.getElementById('b6a')),y6b=centerOf(document.getElementById('b6b'));
+  const H=Math.max(y5a,y5b,y6a,y6b)+10;sv.setAttribute('height',H);sv.innerHTML='';
+  svline(sv,0,y5a,28,y6a);svarrow(sv,32,y6a);
+  svline(sv,0,y5b,28,y6b);svarrow(sv,32,y6b);}
+
+  // merge: 6a+6b → 7
+  {const sv=document.getElementById('sv-merge');
+  const y6a=centerOf(document.getElementById('b6a')),y6b=centerOf(document.getElementById('b6b'));
+  const y7=centerOf(document.getElementById('b7'));
+  const mid=(y6a+y6b)/2;
+  const H=Math.max(y6a,y6b,y7)+10;sv.setAttribute('height',H);sv.innerHTML='';
+  svline(sv,0,y6a,16,y6a);svline(sv,0,y6b,16,y6b);
+  svline(sv,16,y6a,16,y6b);svline(sv,16,mid,32,y7);svarrow(sv,32,y7);}
+}
+
+function alignRows(){
+  const items=['b1','b2','b3','sg4','sg5','sg6','b7'].map(id=>document.getElementById(id));
+  items.forEach(el=>el.style.marginTop='0');
+  const heights=items.map(el=>el.getBoundingClientRect().height);
+  const maxH=Math.max(...heights);
+  items.forEach((el,i)=>{el.style.marginTop=Math.round((maxH-heights[i])/2)+'px';});
+}
+
+// ---- UPDATE ----
+function update(){
+  const rv=tv(MODEL_VERTS,-cameraAngle);
+  const bb=bbof(rv);
+  const dr=depthsRaster(rv,bb,NUM_SAMPLES);
+  const dt=depthsRTX(rv,bb,NUM_SAMPLES);
+  const ir=trapInt(dr,bb),it=trapInt(dt,bb);
+
+  drawModel();drawView(rv);drawBB(rv);
+  drawRaster(rv,bb);drawRTX(rv,bb);
+  drawLinePlot(document.getElementById('c-plot-raster').getContext('2d'),196,120,dr,'#00d4ff');
+  drawLinePlot(document.getElementById('c-plot-rtx').getContext('2d'),196,120,dt,'#ff6b35');
+  drawInteg(document.getElementById('c-integ-raster').getContext('2d'),236,150,dr,bb,'#00d4ff');
+  drawInteg(document.getElementById('c-integ-rtx').getContext('2d'),236,150,dt,bb,'#ff6b35');
+
+  document.getElementById('angle-display').textContent=(cameraAngle*180/Math.PI).toFixed(1)+'°';
+  document.getElementById('final-raster').textContent=ir.toFixed(4);
+  document.getElementById('final-rtx').textContent=it.toFixed(4);
+  document.getElementById('final-diff').textContent=Math.abs(ir-it).toFixed(4);
+
+  requestAnimationFrame(()=>{alignRows();requestAnimationFrame(buildConnectors);});
+}
+
+// ---- INTERACTION ----
+function getA(e){const r=c1.getBoundingClientRect(),cl=e.touches?e.touches[0]:e;return Math.atan2(cl.clientX-r.left-CX1,-(cl.clientY-r.top-CY1));}
+function onHandle(e){const r=c1.getBoundingClientRect(),cl=e.touches?e.touches[0]:e;const mx=cl.clientX-r.left-CX1,my=cl.clientY-r.top-CY1;return Math.hypot(mx-Math.sin(cameraAngle)*CR,my+Math.cos(cameraAngle)*CR)<18;}
+c1.addEventListener('mousedown',e=>{if(onHandle(e))dragging=true;});
+c1.addEventListener('touchstart',e=>{e.preventDefault();if(onHandle(e))dragging=true;},{passive:false});
+window.addEventListener('mousemove',e=>{if(!dragging)return;cameraAngle=getA(e);update();});
+window.addEventListener('touchmove',e=>{if(!dragging)return;e.preventDefault();cameraAngle=getA(e);update();},{passive:false});
+window.addEventListener('mouseup',()=>dragging=false);
+window.addEventListener('touchend',()=>dragging=false);
+
+window.addEventListener('load',()=>update());
+</script>
+</body>
+</html>
