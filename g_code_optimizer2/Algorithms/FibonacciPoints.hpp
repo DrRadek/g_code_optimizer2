@@ -2,4 +2,4 @@
 
 #include "Algorithm.hpp"
 
-void generateFibonacciPoints(Algorithm& algo, int N, std::function<bool(glm::vec3)> callback);
+AlgoTask generateFibonacciPoints(Algorithm& algo, int N, std::function<void(glm::vec3)> callback);

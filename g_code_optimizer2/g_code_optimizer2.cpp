@@ -82,13 +82,14 @@
 #include "Algorithms/AlgorithmSync.hpp"
 
 #include <glm/gtx/quaternion.hpp>
+
+static const std::vector<std::pair<std::string, AlgorithmType>> stringToAlgoType{{"test", AlgorithmType::Test},
+                                                                   {"basic", AlgorithmType::UniformPoints},
+                                                                   {"deterministic", AlgorithmType::Deterministic},
+                                                                   {"montecarlo", AlgorithmType::MonteCarlo},
+                                                                   {"python", AlgorithmType::Python}};
+
 //---------------------------------------------------------------------------------------
-// Ray Tracing Tutorial
-//
-// This is the base class before starting the ray tracing tutorial.
-// It shows the rasterizer rendering of a scene with a teapot and a plane.
-// The tutorial is starting from this class, and will add the ray tracing rendering.
-//
 class GCodeOptimizer2 : public nvapp::IAppElement
 {
   // Type of GBuffers
@@ -106,7 +107,10 @@ public:
     std::string indFilePath        = "";
     std::string outputStlFilePath  = "";
     std::string outputQuatFilePath = "";
+    std::string algo               = "";
   } inputs;
+
+
 
   GCodeOptimizer2(Inputs inputs)
       : inputs(inputs) {};
@@ -218,6 +222,28 @@ public:
         throw std::runtime_error(error);
       }
     }
+
+    // Load algo type to start
+    if(inputs.algo != "")
+    {
+      startAlgorithm = true;
+      initiatedByAlgorithm = true;
+
+      for(const auto& [name, enumType] : stringToAlgoType)
+      {
+        if(name == inputs.algo)
+        {
+          selectedAlgo = enumType;
+        }
+      }
+
+      if(selectedAlgo == AlgorithmType::None)
+      {
+        std::string error = "Error: unkown algorithm (" + inputs.algo + ")";
+        std::cout << error;
+        throw std::runtime_error(error);
+      }
+    }
   }
 
   //-------------------------------------------------------------------------------
@@ -278,15 +304,18 @@ public:
   void onUIRender() override
   {
     namespace PE = nvgui::PropertyEditor;
-    // Display the rendering GBuffer in the ImGui window ("Viewport")
+
+    bool isAlgoRunning = m_algo->isAlgorithmRunning();
 
     // Setting panel
     if(ImGui::Begin("Settings"))
     {
       // Ray tracing toggle
-      if(hasRtx)
-        ImGui::Checkbox("Use Ray Tracing", &m_useRayTracing);
+      ImGui::BeginDisabled(!hasRtx || isAlgoRunning);
+      ImGui::Checkbox("Use Ray Tracing", &m_useRayTracing);
+      ImGui::EndDisabled();
 
+      /*
       if(ImGui::CollapsingHeader("Environment"))
       {
         PE::begin();
@@ -320,9 +349,32 @@ public:
         }
         PE::end();
       }
+      */
 
-      ImGui::Separator();
-      if(ImGui::CollapsingHeader("Other"))
+      if(ImGui::CollapsingHeader("Algorithm selection", ImGuiTreeNodeFlags_DefaultOpen))
+      {
+        if(ImGui::RadioButton("None", !isAlgoRunning))
+        {
+          // Stop whatever algorithm is running
+          StopAlgorithm();
+        }
+        for(const auto& [name, enumType] : stringToAlgoType)
+        {
+          ImGui::BeginDisabled(isAlgoRunning);
+          if(ImGui::RadioButton(name.c_str(), enumType == selectedAlgo))
+          {
+            if(!isAlgoRunning)
+            {
+              // Select only when no algorithm is running
+              // Can re-run the same algorithm
+              selectedAlgo   = enumType;
+              startAlgorithm = true;
+            }
+          }
+          ImGui::EndDisabled();
+        }
+      }
+      if(ImGui::CollapsingHeader("Algorith settings", ImGuiTreeNodeFlags_DefaultOpen))
       {
         PE::begin();
         PE::SliderFloat3("Min aabb", glm::value_ptr(aabbMin), -21.0f, 21.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp, "Override aabb min");
@@ -364,6 +416,7 @@ public:
       }
     }
 
+    // Display the rendering GBuffer in the ImGui window ("Viewport")
     ImGui::End();
     if(ImGui::Begin("Viewport"))
     {
@@ -1187,12 +1240,12 @@ public:
   {
     if(m_algo->isAlgorithmRunning())
     {
-      std::cout << "algo running...\n";
-      // notify algorithm about the result
-      m_algo->notifyAlgorithm(volume, m_camera->getRotation());
+      //std::cout << "algo running...\n";
+      // Run algorithm
+      auto response = m_algo->runAlgorithm({volume, m_camera->getRotation()});
 
-      // Read another request
-      HandleAlgorithmWait();
+      // Process response
+      HandleAlgorithResponse(response);
     }
     else
     {
@@ -1200,79 +1253,84 @@ public:
       {
         std::cout << "starting algo...\n";
         // Request to start the algorithm
-        m_algo->startAlgorithm();
+        auto response = m_algo->startAlgorithm(selectedAlgo);
         m_camera->disableInteractive();
         startAlgorithm = false;
 
-        HandleAlgorithmWait();
+        // Process response
+        HandleAlgorithResponse(response);
       }
     }
   }
 
-  void HandleAlgorithmWait()
-  {
-    auto syncData = m_algo->waitForAlgorithm();
-
-    if(syncData.state == AlgorithmState::done)
+  void StopAlgorithm() {
+    m_algo->stopAlgorithm();
+    selectedAlgo = {};
+    if(initiatedByAlgorithm)
     {
-      std::cout << "done...\n";
-      m_camera->setRotation(syncData.resultRotation);
-      m_algo->stopAlgorithm();
-
-      setQuat      = false;
-      setPosition  = false;
-      movePosition = false;
-
-      if(initiatedByAlgorithm)
-      {
-        // TODO: stop
-      }
-      else
-      {
-        m_camera->enableInteractive();
-      }
+      // TODO: stop
     }
     else
     {
-      std::cout << "not done...\n";
-      moveDirection = syncData.moveDirection;
-      newPosition   = syncData.newPosition;
-      newQuat       = syncData.newQuat;
-      setPosition   = syncData.state == AlgorithmState::setPosition;
-      setQuat       = syncData.state == AlgorithmState::setQuat;
-      movePosition  = syncData.state == AlgorithmState::move;
+      m_camera->enableInteractive();
+    }
+  }
+
+  void HandleAlgorithResponse(AlgoRequestAny request)
+  {
+    bool done     = m_algo->isAlgorithmDone();
+    if(done)
+    {
+      std::cout << "done...\n";
+
+      // Read result
+      auto result = m_algo->getAlgorithmResult();
+      m_camera->setRotation(result.bestRotation);
+
+      /*setQuat      = false;
+      setPosition  = false;
+      movePosition = false;*/
+      cameraChangeRequested = false;
+
+      StopAlgorithm();
+
+      return;
+    }
+    else
+    {
+      //std::cout << "not done...\n";
+
+      cameraChangeRequested = true;
+      algoRequest           = request;
     }
 
-    if(syncData.skipCalculation)
+    auto requestBase = std::visit([](AlgoRequestBase& r) { return r; }, request);
+    if(requestBase.skipCalculation)
     {
       // update camera
       updateViewMatrixFromCamera();
 
-      // notify algorithm about the new camera position
-      std::cout << "notifying algorithm...\n";
-      m_algo->notifyAlgorithm(0, m_camera->getRotation());
+      // Run algorithm again with updated camera position
+      auto response = m_algo->runAlgorithm({0, m_camera->getRotation()});
 
       // wait again in case of skip
-      HandleAlgorithmWait();
+      HandleAlgorithResponse(response);
     }
-    std::cout << " END\n";
+    //std::cout << " END\n";
   }
 
   void updateViewMatrixFromCamera()
   {
     if(m_algo->isAlgorithmRunning())
     {
-      if(setPosition)
+      if(cameraChangeRequested)
       {
-        m_camera->setPositionOnSphere(newPosition);
-      }
-      else if(movePosition)
-      {
-        m_camera->move(moveDirection);
-      }
-      else if(setQuat)
-      {
-        m_camera->setRotation(newQuat);
+        // Move based on what the algorithm requested
+        std::visit(overloaded{
+                       [&](AlgoRequestMoveDir& r) { m_camera->move(r.moveDirection); },
+                       [&](AlgoRequestNewQuat& r) { m_camera->setRotation(r.newQuat); },
+                       [&](AlgoRequestNewPos& r) { m_camera->setPositionOnSphere(r.newPosition); },
+            }, algoRequest);
       }
     }
 
@@ -1448,17 +1506,20 @@ public:
   bool                                 hasRtx = false;
   // Algorithm
   std::unique_ptr<AlgorithmSync> m_algo;
-  bool                           startAlgorithm       = true;
+  bool                           startAlgorithm       = false;
   bool                           initiatedByAlgorithm = false;  // Whether to kill after algorithm finishes
+  AlgorithmType                  selectedAlgo{};                    // Type of the algorithm
 
 private:
   // Set by algorithm (info for camera)
   shaderio::float2 moveDirection;
   glm::quat        newQuat;
   shaderio::float3 newPosition;
-  bool             setPosition  = false;
+  /*bool             setPosition  = false;
   bool             setQuat      = false;
-  bool             movePosition = false;
+  bool             movePosition = false;*/
+  bool             cameraChangeRequested = false;
+  AlgoRequestAny algoRequest;
 
   // Other
   bool  useFixedAreaResolution = true;  // fixed width x height
@@ -1557,10 +1618,17 @@ int main(int argc, char** argv)
   nvutils::ParameterRegistry reg;
   reg.add({"headless", "Run in headless mode"}, &appInfo.headless, true);
   reg.add({"stlfile", "STL file to optimize"}, &inputs.stlFilePath);
-  reg.add({"vertsfile", "STL file to optimize"}, &inputs.vertFilePath);
-  reg.add({"indsfile", "STL file to optimize"}, &inputs.indFilePath);
-  reg.add({"outputstlfile", "STL file to optimize"}, &inputs.outputStlFilePath);
-  reg.add({"outputquatfile", "STL file to optimize"}, &inputs.outputQuatFilePath);
+  reg.add({"vertsfile", "Verts file to read (internal use only)"}, &inputs.vertFilePath);
+  reg.add({"indsfile", "Indicies file to read (internal use only)"}, &inputs.indFilePath);
+  reg.add({"outputstlfile", "Where to save resulting STL file"}, &inputs.outputStlFilePath);
+  reg.add({"outputquatfile", "Where to save resulting quaternion"}, &inputs.outputQuatFilePath);
+  std::string algoString = "Algorithm to run {";
+  for(const auto& type : stringToAlgoType)
+  {
+    algoString += "\n" + type.first + "\n" + ",";
+  }
+  algoString[algoString.length() - 1] = '}';
+  reg.add({"algorithm", algoString}, &inputs.algo);
   cli.add(reg);
   cli.parse(argc, argv);
 

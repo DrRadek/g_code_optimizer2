@@ -39,20 +39,11 @@ class DeterministicAlgorithm : public Algorithm
   std::priority_queue<PointWithInfo> bestKPoints;
   PointWithInfo                      bestPoint{std::numeric_limits<float>::max(), glm::quat(1, 0, 0, 0)};
 
-  void algorithmLogic() override
+  AlgoTask algorithmLogic() override
   {
-    bool endAlgorithm = false;
-
     // Step: 1 find best K candidates
     std::cout << "Finding best K candidates...\n";
-    generateFibonacciPoints(*this, N, [this, &endAlgorithm](glm::vec3 point) {
-      if(!requestVolumeForPosition(point))
-      {
-        endAlgorithm = true;
-        return false;
-      }
-
-      // Save if lowest than currently highest value
+    co_await generateFibonacciPoints(*this, N, [this](glm::vec3 point) {
       if(bestKPoints.size() < K)
       {
         bestKPoints.push({currentVolume, currentRotation});
@@ -62,12 +53,7 @@ class DeterministicAlgorithm : public Algorithm
         bestKPoints.pop();
         bestKPoints.push({currentVolume, currentRotation});
       }
-
-      return true;
     });
-
-    if(endAlgorithm)
-      return;
 
     // Optimize best k
     std::cout << "Optimizing best K candidates...\n";
@@ -77,15 +63,14 @@ class DeterministicAlgorithm : public Algorithm
       bestKPoints.pop();
 
       // Set position to the point
-      if(!requestVolumeForQuat(point.rotation, true))
-        return;
+      co_await requestVolumeForQuat(point.rotation, true);
+
       currentVolume   = point.volume;
       currentRotation = point.rotation;
 
       // Run local optimizer
       HookeJeeves localOptimizer = HookeJeeves(*this, KPointsDeltaStart, KPointsDeltaEnd, KPointsMaxSteps);
-      if(!localOptimizer.optimize())
-        return;
+      co_await localOptimizer.optimize();
 
       float volume = localOptimizer.getBestVolume();
 
@@ -98,27 +83,26 @@ class DeterministicAlgorithm : public Algorithm
 
     //// Set position to the point
     std::cout << "Optimizing best candidate...\n";
-    if(!requestVolumeForQuat(bestPoint.rotation, true))
-      return;
+    co_await requestVolumeForQuat(bestPoint.rotation, true);
     currentVolume   = bestPoint.volume;
     currentRotation = bestPoint.rotation;
 
     // Optimize further
     HookeJeeves localOptimizer = HookeJeeves(*this, LastPointDeltaStart, LastPointDeltaEnd, LastPointMaxSteps);
-    if(!localOptimizer.optimize())
-      return;
+    co_await localOptimizer.optimize();
 
     bestVolume   = localOptimizer.getBestVolume();
     bestRotation = localOptimizer.getBestRotation();
 
     std::cout << "Best volume is:" << bestVolume << "\n";
 
-    finishAlgorithm();
+    // Finish
+    co_return AlgoResult(bestVolume, bestRotation);
   };
 
 public:
-  DeterministicAlgorithm(SyncInfo& syncInfo, SyncData& syncData)
-      : Algorithm(syncInfo, syncData)
+  DeterministicAlgorithm()
+      : Algorithm()
   {
   }
 };

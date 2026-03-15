@@ -40,7 +40,7 @@ class MonteCarloAlgorithm : public Algorithm
   float LastPointDeltaEnd   = 0.00001f;
   int   LastPointMaxSteps   = 100;
 
-  void algorithmLogic() override
+  AlgoTask algorithmLogic() override
   {
     std::cout << "Generate and optimize N random candidates...\n";
     for(int i = 0; i < N; ++i)
@@ -49,13 +49,11 @@ class MonteCarloAlgorithm : public Algorithm
       glm::vec3 point = randomDirection();
 
       // Set position to the point
-      if(!requestVolumeForQuat(point))
-        return;
+      co_await requestVolumeForQuat(point);
 
       // Run local optimizer
       HookeJeeves localOptimizer = HookeJeeves(*this, KPointsDeltaStart, KPointsDeltaEnd, KPointsMaxSteps);
-      if(!localOptimizer.optimize())
-        return;
+      co_await localOptimizer.optimize();
 
       float volume = localOptimizer.getBestVolume();
 
@@ -69,27 +67,26 @@ class MonteCarloAlgorithm : public Algorithm
 
     //// Set position to the point
     std::cout << "Optimizing best candidate...\n";
-    if(!requestVolumeForQuat(bestRotation, true))
-      return;
+    co_await requestVolumeForQuat(bestRotation, true);
     currentVolume   = bestVolume;
     currentRotation = bestRotation;
 
     // Optimize further
     HookeJeeves localOptimizer = HookeJeeves(*this, LastPointDeltaStart, LastPointDeltaEnd, LastPointMaxSteps);
-    if(!localOptimizer.optimize())
-      return;
+    co_await localOptimizer.optimize();
 
     bestVolume   = localOptimizer.getBestVolume();
     bestRotation = localOptimizer.getBestRotation();
 
     std::cout << "Best volume is:" << bestVolume << "\n";
 
-    finishAlgorithm();
+    // Finish
+    co_return AlgoResult(bestVolume, bestRotation);
   };
 
 public:
-  MonteCarloAlgorithm(SyncInfo& syncInfo, SyncData& syncData)
-      : Algorithm(syncInfo, syncData)
+  MonteCarloAlgorithm()
+      : Algorithm()
   {
   }
 };

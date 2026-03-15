@@ -11,6 +11,30 @@
 #include <glm/gtx/quaternion.hpp>
 
 #include "AlgorithmRun.hpp"
+#include "Algorithm.hpp"
+
+#include <coroutine>
+#include <iostream>
+#include <cassert>
+#include <variant>
+
+template <class... Ts>
+struct overloaded : Ts...
+{
+  using Ts::operator()...;
+};
+
+enum class AlgorithmType
+{
+  None,
+  Test,
+  UniformPoints,
+  Deterministic,
+  MonteCarlo,
+  Python
+};
+
+AlgoTask startAlgorithmTask(AlgorithmType algoType, std::unique_ptr<Algorithm>& algoOwner);
 
 class AlgorithmSync
 {
@@ -18,55 +42,48 @@ public:
   AlgorithmSync() = default;
   ~AlgorithmSync() { stopAlgorithm(); }
 
-  void startAlgorithm()
+  AlgoRequestAny startAlgorithm(AlgorithmType algoType)
   {
     stopAlgorithm();
+    task = startAlgorithmTask(algoType, algorithm);
 
-    syncInfo.syncState = SyncState::RendererDone;
-    algorithm_thread = std::thread(runAlgorithm, std::ref(syncInfo), std::ref(syncData), AlgorithmType::Deterministic);
+    auto& h = task->h;
+    auto& p = h.promise();
+
+    h.resume();
     algorithmRunning = true;
+
+    return p.algo_request.value();
   }
 
   void stopAlgorithm()
   {
-    if(algorithm_thread.joinable())
-    {
-      {
-        std::lock_guard<std::mutex> lock(syncInfo.mtx);
-        syncInfo.syncState = SyncState::ShuttingDown;
-      }
-      syncInfo.cv.notify_one();
-      algorithm_thread.join();
-    }
+    task.reset();
+    algorithm.reset();
     algorithmRunning = false;
   }
 
-  bool isAlgorithmRunning() { return algorithmRunning; }
+  bool       isAlgorithmRunning() { return algorithmRunning; }
+  bool       isAlgorithmDone() { return task->h.done(); }
+  AlgoResult getAlgorithmResult() { return task->h.promise().algo_result; }
 
-  // returns done/not done
-  SyncData waitForAlgorithm()
+  AlgoRequestAny runAlgorithm(RendererResult result)
   {
-    std::unique_lock lock(syncInfo.mtx);
-    syncInfo.cv.wait(lock, [&] { return syncInfo.syncState == SyncState::AlgorithmDone; });
-    return syncData;
-  }
+    auto& h = task->h;
+    auto& p = h.promise();
 
-  void notifyAlgorithm(float resultVolume, glm::quat resultRotation)
-  {
-    {
-      std::lock_guard<std::mutex> lock(syncInfo.mtx);
-      syncData.result         = resultVolume;
-      syncData.resultRotation = resultRotation;
-      syncInfo.syncState      = SyncState::RendererDone;
-    }
-    syncInfo.cv.notify_one();
+    p.renderer_result = result;
+    p.algo_request.reset();
+    p.active.resume();
+
+    if(isAlgorithmDone())
+      return AlgoRequestAny{};
+
+    return p.algo_request.value();
   }
 
 private:
-  // algorithm thread
-  std::thread algorithm_thread;
-  bool        algorithmRunning = false;
-
-  SyncInfo syncInfo{};
-  SyncData syncData{};
+  bool                       algorithmRunning = false;
+  std::optional<AlgoTask>    task;
+  std::unique_ptr<Algorithm> algorithm;
 };
