@@ -15,7 +15,7 @@ public:
     baseVolume   = algo.getCurrentVolume();
   }
 
-  bool      optimize() { return runProcedure1(); }
+  AlgoTask      optimize() { co_await runProcedure1(); }
   float     getBestVolume() { return baseVolume; }
   glm::quat getBestRotation() { return baseRotation; }
 
@@ -42,37 +42,33 @@ private:
   // 2) Is value better?
   //	no -> update step size/exit
   //	yes -> run procedure 2
-  bool runProcedure1()
+  AlgoTask runProcedure1()
   {
     while(true)
     {
       // Start at base position
       currentRotation = baseRotation;
       currentVolume   = baseVolume;
-      if(!algo.requestVolumeForQuat(baseRotation, false))
-        return false;
+      co_await algo.requestVolumeForQuat(baseRotation, false);
 
-      if(!Explore())
-      {
-        return false;
-      }
+      co_await Explore();
 
       if(currentVolume < baseVolume)
       {
-        if(!runProcedure2())
-          return false;
+        co_await runProcedure2();
       }
       else
       {
-        // Update step
+        // Is required accuracy achieved?
         if(deltaStep <= tolerance)
         {
           // Trigger calculation to prevent freeze
-          if(!algo.requestVolumeForQuat(baseRotation))
-            return false;
-          return true;
+          // Finish
+          co_await algo.requestVolumeForQuat(baseRotation);
+          co_return{};
         }
 
+        // Update step
         deltaStep *= 0.5;
         std::cout << "delta step is:" << deltaStep << "\n";
       }
@@ -86,7 +82,7 @@ private:
   // 4) Is value better?
   //	no -> return back to procedure 1
   //	yes -> repeat
-  bool runProcedure2()
+  AlgoTask runProcedure2()
   {
     while(true)
     {
@@ -95,50 +91,41 @@ private:
       baseVolume   = currentVolume;
 
       // Pattern move
-      if(!PatternMove())
-        return false;
+      co_await PatternMove();
 
       // Explore
-      if(!Explore())
-        return false;
+      co_await Explore();
 
       if(currentVolume >= baseVolume)
       {
         // Not better than base
         // return back to procedure 1
-        return true;
+        break;
       }
     }
   }
 
-  bool PatternMove()
+  AlgoTask PatternMove()
   {
-    if(!algo.requestVolumeForMove(directionVector))
-      return false;
+    co_await algo.requestVolumeForMove(directionVector);
 
     currentRotation = algo.getCurrentRotation();
     currentVolume   = algo.getCurrentVolume();
-
-    return true;
   }
 
-  bool Explore()
+  AlgoTask Explore()
   {
     explorationStepMoved = false;
     directionVector      = {0, 0};
 
     for(int i = 0; i < 2; i++)
     {
-      if(!ExploreInAxis(i))
-        return false;
+      co_await ExploreInAxis(i);
     }
-
-    return true;
   }
 
   // Helpers
-  // returns false in case of abort from main thread
-  bool ExploreInAxis(int axis)
+  AlgoTask ExploreInAxis(int axis)
   {
     //auto      bestVolume   = data.currentVolume;
     glm::vec2 bestDir{0, 0};
@@ -146,25 +133,21 @@ private:
 
     // move in direction
     testingDir[axis] = deltaStep;
-    if(!algo.requestVolumeForMove(testingDir))
-      return false;
+    co_await algo.requestVolumeForMove(testingDir);
     if(algo.getCurrentVolume() >= currentVolume)
     {  // Result is worse or same, try other direction
 
       // reset
-      if(!algo.requestVolumeForQuat(currentRotation, true))
-        return false;
+      co_await algo.requestVolumeForQuat(currentRotation, true);
 
       // move in the opposite direction
       testingDir[axis] = -deltaStep;
-      if(!algo.requestVolumeForMove(testingDir))
-        return false;
+      co_await algo.requestVolumeForMove(testingDir);
       if(algo.getCurrentVolume() >= currentVolume)
       {  // Result is worse in both axis, not moving
         // Reset to original position
-        if(!algo.requestVolumeForQuat(currentRotation, true))
-          return false;
-        return true;
+        co_await algo.requestVolumeForQuat(currentRotation, true);
+        co_return {};
       }
     }
 
@@ -172,7 +155,5 @@ private:
     currentVolume         = algo.getCurrentVolume();
     currentRotation       = algo.getCurrentRotation();
     directionVector[axis] = testingDir[axis];
-
-    return true;
   }
 };

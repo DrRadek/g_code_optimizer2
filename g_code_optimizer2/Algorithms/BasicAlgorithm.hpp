@@ -6,33 +6,27 @@
 class UniformPointsAlgorithm : public Algorithm
 {
   // Algo parameters
-  int N = 10;
+  int N = 10000;
 
-  void algorithmLogic() override
+  AlgoTask algorithmLogic() override
   {
-    generateFibonacciPoints(*this, N, [this](glm::vec3 point) {
-      std::cout << "requesting volume" << "\n";
-      if(!requestVolumeForPosition(point))
-        return false;
-
-      std::cout << "Volume is:" << currentVolume << "\n";
+    co_await generateFibonacciPoints(*this, N, [this](glm::vec3 point) {
       if(currentVolume < bestVolume)
       {
         bestVolume   = currentVolume;
         bestRotation = currentRotation;
       }
-
-      return true;
     });
 
     std::cout << "Best volume is:" << bestVolume << "\n";
 
-    finishAlgorithm();
+    // Finish
+    co_return AlgoResult(bestVolume, bestRotation);
   };
 
 public:
-  UniformPointsAlgorithm(SyncInfo& syncInfo, SyncData& syncData)
-      : Algorithm(syncInfo, syncData)
+  UniformPointsAlgorithm()
+      : Algorithm()
   {
   }
 };

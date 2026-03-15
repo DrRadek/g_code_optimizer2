@@ -1,6 +1,6 @@
 #include "FibonacciPoints.hpp"
 
-void generateFibonacciPoints(Algorithm& algo, int N, std::function<bool(glm::vec3)> callback)
+AlgoTask generateFibonacciPoints(Algorithm& algo, int N, std::function<void(glm::vec3)> callback)
 {
   const float goldenRatio = (1.0f + sqrtf(5.0f)) * 0.5f;
   const float goldenAngle = 2.0f * glm::pi<float>() / goldenRatio;
@@ -15,7 +15,9 @@ void generateFibonacciPoints(Algorithm& algo, int N, std::function<bool(glm::vec
     float x = r * cosf(theta);
     float y = r * sinf(theta);
 
-    if(!callback({x, y, z}))
-      break;
+    //std::cout << "requesting volume" << "\n";
+    co_await algo.requestVolumeForPosition({x,y,z});
+
+    callback({x, y, z});
   }
 }
