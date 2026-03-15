@@ -10,7 +10,6 @@
 
 #include <glm/gtx/quaternion.hpp>
 
-#include "AlgorithmRun.hpp"
 #include "Algorithm.hpp"
 
 #include <coroutine>
