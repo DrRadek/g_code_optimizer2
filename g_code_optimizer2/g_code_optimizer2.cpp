@@ -83,11 +83,17 @@
 
 #include <glm/gtx/quaternion.hpp>
 
+// Python
+#include "python_volume_forwarder.hpp"
+
+// Json
+#include "include/json_helpers.hpp"
+
 static const std::vector<std::pair<std::string, AlgorithmType>> stringToAlgoType{{"test", AlgorithmType::Test},
-                                                                   {"basic", AlgorithmType::UniformPoints},
-                                                                   {"deterministic", AlgorithmType::Deterministic},
-                                                                   {"montecarlo", AlgorithmType::MonteCarlo},
-                                                                   {"python", AlgorithmType::Python}};
+                                                                                 {"basic", AlgorithmType::UniformPoints},
+                                                                                 {"deterministic", AlgorithmType::Deterministic},
+                                                                                 {"montecarlo", AlgorithmType::MonteCarlo},
+                                                                                 {"python", AlgorithmType::Python}};
 
 //---------------------------------------------------------------------------------------
 class GCodeOptimizer2 : public nvapp::IAppElement
@@ -109,7 +115,6 @@ public:
     std::string outputQuatFilePath = "";
     std::string algo               = "";
   } inputs;
-
 
 
   GCodeOptimizer2(Inputs inputs)
@@ -221,12 +226,14 @@ public:
         std::cout << error;
         throw std::runtime_error(error);
       }
+
+      maxVolume = (aabbMax.x - aabbMin.x) * (aabbMax.y - aabbMin.y) * (aabbMax.z - aabbMin.z);
     }
 
     // Load algo type to start
     if(inputs.algo != "")
     {
-      startAlgorithm = true;
+      startAlgorithm       = true;
       initiatedByAlgorithm = true;
 
       for(const auto& [name, enumType] : stringToAlgoType)
@@ -315,42 +322,6 @@ public:
       ImGui::Checkbox("Use Ray Tracing", &m_useRayTracing);
       ImGui::EndDisabled();
 
-      /*
-      if(ImGui::CollapsingHeader("Environment"))
-      {
-        PE::begin();
-        PE::ColorEdit3("Background", (float*)&m_sceneResource.sceneInfo.backgroundColor);
-        PE::end();
-        // Light
-        PE::begin();
-        if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::ePoint
-           || m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-        {
-          PE::DragFloat3("Light Position", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].position), 1.0f,
-                         -20.0f, 20.0f, "%.2f", ImGuiSliderFlags_None, "Position of the light");
-        }
-        if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eDirectional
-           || m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-        {
-          PE::SliderFloat3("Light Direction", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].direction),
-                           -1.0f, 1.0f, "%.2f", ImGuiSliderFlags_None, "Direction of the light");
-        }
-
-        PE::SliderFloat("Light Intensity", &m_sceneResource.sceneInfo.punctualLights[0].intensity, 0.0f, 1000.0f,
-                        "%.2f", ImGuiSliderFlags_Logarithmic, "Intensity of the light");
-        PE::ColorEdit3("Light Color", glm::value_ptr(m_sceneResource.sceneInfo.punctualLights[0].color),
-                       ImGuiColorEditFlags_NoInputs, "Color of the light");
-        PE::Combo("Light Type", (int*)&m_sceneResource.sceneInfo.punctualLights[0].type, "Point\0Spot\0Directional\0",
-                  3, "Type of the light (Point, Spot, Directional)");
-        if(m_sceneResource.sceneInfo.punctualLights[0].type == shaderio::GltfLightType::eSpot)
-        {
-          PE::SliderAngle("Cone Angle", &m_sceneResource.sceneInfo.punctualLights[0].coneAngle, 0.f, 90.f, "%.2f",
-                          ImGuiSliderFlags_AlwaysClamp, "Cone angle of the spot light");
-        }
-        PE::end();
-      }
-      */
-
       if(ImGui::CollapsingHeader("Algorithm selection", ImGuiTreeNodeFlags_DefaultOpen))
       {
         if(ImGui::RadioButton("None", !isAlgoRunning))
@@ -412,6 +383,16 @@ public:
           maxResolutionChanged     = true;
           currentResolutionChanged = true;
         }
+        PE::end();
+      }
+      if(ImGui::CollapsingHeader("Python forwarder", ImGuiTreeNodeFlags_DefaultOpen))
+      {
+        PE::begin();
+        PE::Checkbox("Forward to python", &forwardToPython, "Forward volume to python visualizer");
+        PE::Checkbox("Forward position to python", &forwardPositionToPython, "Forward position to python visualizer");
+        PE::Checkbox("Forward volume to python visualizer", &forwardVolumeToPython, "Forward volume to python visualizer");
+        PE::SliderFloat("Visualizer point size", &pythonForwarderPointSize, 1, 50);
+        pythonForwarderClear = PE::Button("Clear", {100, 20}, "Clear");
         PE::end();
       }
     }
@@ -485,6 +466,10 @@ public:
 
     // Calculate volume
     GetVolumeCalculationResult();
+
+    // Forward to python
+    if(forwardToPython)
+      ForwardToPython();
 
     // Algorithm synchronization
     RunAlgorithm();
@@ -1263,7 +1248,8 @@ public:
     }
   }
 
-  void StopAlgorithm() {
+  void StopAlgorithm()
+  {
     m_algo->stopAlgorithm();
     selectedAlgo = {};
     if(initiatedByAlgorithm)
@@ -1278,7 +1264,7 @@ public:
 
   void HandleAlgorithResponse(AlgoRequestAny request)
   {
-    bool done     = m_algo->isAlgorithmDone();
+    bool done = m_algo->isAlgorithmDone();
     if(done)
     {
       std::cout << "done...\n";
@@ -1330,13 +1316,40 @@ public:
                        [&](AlgoRequestMoveDir& r) { m_camera->move(r.moveDirection); },
                        [&](AlgoRequestNewQuat& r) { m_camera->setRotation(r.newQuat); },
                        [&](AlgoRequestNewPos& r) { m_camera->setPositionOnSphere(r.newPosition); },
-            }, algoRequest);
+                   },
+                   algoRequest);
       }
     }
 
     viewMatrix = m_camera->getViewMatrix();
     // std::cout << m_camera->getRoll() << "\n";
     viewInvMatrix = glm::inverse(viewMatrix);
+    lastRotation  = m_camera->getRotation();
+  }
+
+  void ForwardToPython()
+  {
+    if(pythonVolumeForwarder.get() == nullptr)
+    {
+      try
+      {
+        pythonVolumeForwarder = std::unique_ptr<PythonVolumeForwarder>(new PythonVolumeForwarder());
+      }
+      catch(...)
+      {
+        // Disable forwarder in case of failure
+        forwardVolumeToPython   = false;
+        forwardPositionToPython = false;
+        forwardToPython         = false;
+        pythonVolumeForwarder.reset();
+        return;
+      }
+    }
+
+    // Run step
+    float normalized_volume = volume / (float)maxVolume;
+    pythonVolumeForwarder.get()->RunStep(lastRotation, normalized_volume, forwardVolumeToPython,
+                                         forwardPositionToPython, pythonForwarderPointSize, pythonForwarderClear);
   }
 
   void LoadStlData(VkCommandBuffer cmd)
@@ -1508,17 +1521,23 @@ public:
   std::unique_ptr<AlgorithmSync> m_algo;
   bool                           startAlgorithm       = false;
   bool                           initiatedByAlgorithm = false;  // Whether to kill after algorithm finishes
-  AlgorithmType                  selectedAlgo{};                    // Type of the algorithm
+  AlgorithmType                  selectedAlgo{};                // Type of the algorithm
 
 private:
+  // Python
+  std::unique_ptr<PythonVolumeForwarder> pythonVolumeForwarder;
+  bool                                   forwardToPython          = false;
+  bool                                   forwardPositionToPython  = false;
+  bool                                   forwardVolumeToPython    = false;
+  float                                  pythonForwarderPointSize = 5;
+  bool                                   pythonForwarderClear     = false;
+  glm::quat                              lastRotation;  // Camera rotation used in last frame
+
   // Set by algorithm (info for camera)
   shaderio::float2 moveDirection;
   glm::quat        newQuat;
   shaderio::float3 newPosition;
-  /*bool             setPosition  = false;
-  bool             setQuat      = false;
-  bool             movePosition = false;*/
-  bool             cameraChangeRequested = false;
+  bool           cameraChangeRequested = false;
   AlgoRequestAny algoRequest;
 
   // Other
@@ -1534,6 +1553,7 @@ private:
   nvvk::Buffer                m_outVolumeBuffer;              // Buffer for volume calculations
   nvvk::Buffer                m_outVolumeBufferForReduction;  // Buffer for volume reduction
   float                       volume    = 0;
+  float                       maxVolume = 0;
   float                       minVolume = std::numeric_limits<float>().max();
   shaderio::float4x4          bestRotation;  // Used to save the result
   //shaderio::float4x4          bestMatrixFromAlgo;
@@ -1568,9 +1588,6 @@ private:
   nvvk::SamplerPool      m_samplerPool{};      // Texture sampler pool, used to acquire texture samplers for images
   nvvk::GBuffer          m_gBuffers{};         // The G-Buffer
   nvslang::SlangCompiler m_slangCompiler{};    // The Slang compiler used to compile the shaders
-
-  // Camera manipulator
-  //std::shared_ptr<nvutils::CameraManipulator> m_cameraManip{std::make_shared<nvutils::CameraManipulator>()};
 
   // Pipeline
   nvvk::GraphicsPipelineState m_dynamicPipeline;  // The dynamic pipeline state used to set the graphics pipeline state, like viewport, scissor, and depth test
@@ -1613,6 +1630,8 @@ int main(int argc, char** argv)
   nvapp::ApplicationCreateInfo appInfo{};
   GCodeOptimizer2::Inputs      inputs;
 
+  std::string config;
+
   // Parsing the command line
   nvutils::ParameterParser   cli(nvutils::getExecutablePath().stem().string());
   nvutils::ParameterRegistry reg;
@@ -1622,6 +1641,8 @@ int main(int argc, char** argv)
   reg.add({"indsfile", "Indicies file to read (internal use only)"}, &inputs.indFilePath);
   reg.add({"outputstlfile", "Where to save resulting STL file"}, &inputs.outputStlFilePath);
   reg.add({"outputquatfile", "Where to save resulting quaternion"}, &inputs.outputQuatFilePath);
+  reg.add({"config", "./config"}, &config);
+
   std::string algoString = "Algorithm to run {";
   for(const auto& type : stringToAlgoType)
   {
@@ -1631,6 +1652,9 @@ int main(int argc, char** argv)
   reg.add({"algorithm", algoString}, &inputs.algo);
   cli.add(reg);
   cli.parse(argc, argv);
+
+  // Config
+  AppConfig::instance().setBasePath(config);
 
   // Setting up the Vulkan context, instance and device extensions
   VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT};
@@ -1712,11 +1736,8 @@ int main(int argc, char** argv)
 
   // Elements added to the application
   auto g_code_optimizer2 = std::make_shared<GCodeOptimizer2>(inputs);  // Our tutorial element
-  //auto elemCamera = std::make_shared<nvapp::ElementCamera>();  // Element to control the camera movement
   auto windowTitle = std::make_shared<nvapp::ElementDefaultWindowTitle>();  // Element displaying the window title with application name and size
   auto windowMenu = std::make_shared<nvapp::ElementDefaultMenu>();  // Element displaying a menu, File->Exit ...
-  //auto camManip   = tutorial->getCameraManipulator();
-  //elemCamera->setCameraManipulator(camManip);
   auto customCamera           = std::make_shared<nvapp::CustomCamera>();
   g_code_optimizer2->m_camera = customCamera;
   g_code_optimizer2->m_algo   = std::move(algoSync);
@@ -1725,7 +1746,6 @@ int main(int argc, char** argv)
   // Adding all elements
   application.addElement(windowMenu);
   application.addElement(windowTitle);
-  //application.addElement(elemCamera);
   application.addElement(customCamera);
   application.addElement(g_code_optimizer2);
 

@@ -46,21 +46,7 @@ void nvsamples::SaveStlResources(const std::filesystem::path& path, const std::v
 
 std::vector<shaderio::float3> nvsamples::exportVerticesFromStlTriangles(std::vector<openstl::Triangle> triangles)
 {
-  std::vector<shaderio::float3> vertices;
-
-  const size_t   triCount  = triangles.size();
-  const uint32_t vertCount = uint32_t(triCount * 3);
-  vertices.reserve(triCount);
-
-  for(size_t t = 0; t < triCount; ++t)
-  {
-    const auto& tri = triangles[t];
-    vertices.push_back(tri.v0);
-    vertices.push_back(tri.v1);
-    vertices.push_back(tri.v2);
-  }
-
-  return vertices;
+  return openstl::convertToVertices(triangles);
 }
 
 void nvsamples::importStlData(GltfSceneResource&             sceneResource,

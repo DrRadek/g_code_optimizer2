@@ -1,16 +1,24 @@
+#pragma once
 #include "Algorithm.hpp"
 
 #include <glm/gtc/constants.hpp>
 #include "FibonacciPoints.hpp"
 
+#include "include/json_helpers.hpp"
+#include <nlohmann/json.hpp>
+
 class UniformPointsAlgorithm : public Algorithm
 {
   // Algo parameters
-  int N = 10000;
+  struct Config
+  {
+    int N = 10000;
+  };
+  const Config config;
 
   AlgoTask algorithmLogic() override
   {
-    co_await generateFibonacciPoints(*this, N, [this](glm::vec3 point) {
+    co_await generateFibonacciPoints(*this, config.N, [this](glm::vec3 point) {
       if(currentVolume < bestVolume)
       {
         bestVolume   = currentVolume;
@@ -27,6 +35,9 @@ class UniformPointsAlgorithm : public Algorithm
 public:
   UniformPointsAlgorithm()
       : Algorithm()
+      , config(getJsonConfig<Config>(AppConfig::instance().getAlgorithmsPath() + "\\basic.json"))
   {
   }
 };
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(UniformPointsAlgorithm::Config, N)

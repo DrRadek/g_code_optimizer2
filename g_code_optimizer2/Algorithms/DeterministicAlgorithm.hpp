@@ -1,3 +1,4 @@
+#pragma once
 #include "Algorithm.hpp"
 
 #include <glm/gtc/constants.hpp>
@@ -6,26 +7,34 @@
 
 #include <queue>
 
+#include "include/json_helpers.hpp"
+#include <nlohmann/json.hpp>
+#include <fstream>
+
+
 // 1) find best K candidates
 // 2) optimize best K
 // 3) Choose the best one and optimize further
 class DeterministicAlgorithm : public Algorithm
 {
-  // Algo parameters
-  int N = 2000;  // N points to generate
-  int K = 60;    // K points to choose
+  struct Config
+  {
+    // Algo parameters
+    int N = 2000;  // N points to generate
+    int K = 10;    // K points to choose
 
-  // Parameters for local optimization of K points
-  float KPointsDeltaStart = 0.1f;
-  float KPointsDeltaEnd   = 0.03f;
-  int   KPointsMaxSteps   = 100;
+    // Parameters for local optimization of K points
+    float KPointsDeltaStart = 0.1f;
+    float KPointsDeltaEnd   = 0.03f;
+    int   KPointsMaxSteps   = 100;
 
-  // Parameters for local optimization of last point
-  float LastPointDeltaStart = 0.03f;
-  float LastPointDeltaEnd   = 0.00001f;
-  int   LastPointMaxSteps   = 100;
+    // Parameters for local optimization of last point
+    float LastPointDeltaStart = 0.03f;
+    float LastPointDeltaEnd   = 0.00001f;
+    int   LastPointMaxSteps   = 100;
+  };
+  const Config config;
 
-  //
 
   struct PointWithInfo
   {
@@ -43,8 +52,8 @@ class DeterministicAlgorithm : public Algorithm
   {
     // Step: 1 find best K candidates
     std::cout << "Finding best K candidates...\n";
-    co_await generateFibonacciPoints(*this, N, [this](glm::vec3 point) {
-      if(bestKPoints.size() < K)
+    co_await generateFibonacciPoints(*this, config.N, [this](glm::vec3 point) {
+      if(bestKPoints.size() < config.K)
       {
         bestKPoints.push({currentVolume, currentRotation});
       }
@@ -69,7 +78,7 @@ class DeterministicAlgorithm : public Algorithm
       currentRotation = point.rotation;
 
       // Run local optimizer
-      HookeJeeves localOptimizer = HookeJeeves(*this, KPointsDeltaStart, KPointsDeltaEnd, KPointsMaxSteps);
+      HookeJeeves localOptimizer = HookeJeeves(*this, config.KPointsDeltaStart, config.KPointsDeltaEnd, config.KPointsMaxSteps);
       co_await localOptimizer.optimize();
 
       float volume = localOptimizer.getBestVolume();
@@ -88,7 +97,7 @@ class DeterministicAlgorithm : public Algorithm
     currentRotation = bestPoint.rotation;
 
     // Optimize further
-    HookeJeeves localOptimizer = HookeJeeves(*this, LastPointDeltaStart, LastPointDeltaEnd, LastPointMaxSteps);
+    HookeJeeves localOptimizer = HookeJeeves(*this, config.LastPointDeltaStart, config.LastPointDeltaEnd, config.LastPointMaxSteps);
     co_await localOptimizer.optimize();
 
     bestVolume   = localOptimizer.getBestVolume();
@@ -103,6 +112,9 @@ class DeterministicAlgorithm : public Algorithm
 public:
   DeterministicAlgorithm()
       : Algorithm()
+      , config(getJsonConfig<Config>(AppConfig::instance().getAlgorithmsPath() + "\\deterministic.json"))
   {
   }
 };
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(DeterministicAlgorithm::Config, N, K, KPointsDeltaStart, KPointsDeltaEnd, KPointsMaxSteps, LastPointDeltaStart, LastPointDeltaEnd, LastPointMaxSteps)

@@ -20,3 +20,5 @@ samples/.vscode/
 _bin/
 
 __pycache__/
+
+venv*/

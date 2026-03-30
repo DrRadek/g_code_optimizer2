@@ -10,6 +10,7 @@
 
 #include "shaders/shaderio.h"
 
+#include <iostream>
 
 VkResult nvshaders::AABBCompute::init(VkCommandBuffer               cmd,
                                       nvvk::ResourceAllocator*      alloc,
@@ -17,6 +18,7 @@ VkResult nvshaders::AABBCompute::init(VkCommandBuffer               cmd,
                                       std::vector<shaderio::float3> vertices)
 {
   const auto         vertCount = vertices.size();
+  std::cout << "[AABB] amount of vertices is: " << vertCount << "\n";
 
   const unsigned ITEMS_PER_THREAD = 4;
   const unsigned int vertsPerGroup    = shaderio::AABB_SHADER_WG_SIZE_CPU * ITEMS_PER_THREAD;

@@ -13,6 +13,8 @@
 #     [INCLUDE_H_SLANG_FILES]            # Include .h.slang files in shader compilation
 #   )
 
+include(FetchContent)
+
 function(setup_rt_tutorial_sample)
     # Parse function arguments
     set(options USE_RT_COMMON USE_FOUNDATION_SHADER INCLUDE_H_SLANG_FILES)
@@ -49,6 +51,14 @@ function(setup_rt_tutorial_sample)
     add_executable(${PROJECT_NAME} ${ALL_SOURCES})
     set_property(TARGET ${PROJECT_NAME} PROPERTY FOLDER "g_code_optimizer2")
 
+    # json
+    FetchContent_Declare(
+        nlohmann_json
+        GIT_REPOSITORY https://github.com/nlohmann/json.git
+        GIT_TAG        v3.12.0
+    )
+    FetchContent_MakeAvailable(nlohmann_json)
+
     # Link libraries and include directories (consistent across all samples)
     target_link_libraries(${PROJECT_NAME} PRIVATE
         nvpro2::nvapp
@@ -60,13 +70,14 @@ function(setup_rt_tutorial_sample)
         nvpro2::nvaftermath
         nvpro2::nvvkgltf
         nvpro2::nvvkglsl
+        nlohmann_json::nlohmann_json
         vk_raytracing_tutorial_common
     )
 
     add_project_definitions(${PROJECT_NAME})
 
     # Include directory for generated files
-    target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR} ${ROOT_DIR})
+    target_include_directories(${PROJECT_NAME} PRIVATE ${CMAKE_BINARY_DIR} ${CMAKE_SOURCE_DIR} ${ROOT_DIR} ${CMAKE_SOURCE_DIR}/g_code_optimizer2)
 
     #------------------------------------------------------------------------------------------------------------------------------
     # Compile shaders
@@ -144,5 +155,11 @@ function(setup_rt_tutorial_sample)
         DIRECTORIES ${COPY_DIRECTORIES}
         LOCAL_DIRS "${CMAKE_CURRENT_LIST_DIR}/shaders"
         AUTO
+    )
+
+    add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_SOURCE_DIR}/g_code_optimizer2/config
+            $<TARGET_FILE_DIR:${PROJECT_NAME}>/config
     )
 endfunction()

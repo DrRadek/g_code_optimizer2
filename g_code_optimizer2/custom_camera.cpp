@@ -46,17 +46,20 @@ void CustomCamera::onUIRender()
 
 void CustomCamera::move(glm::vec2 direction)
 {
-  rotation = glm::angleAxis(direction.x, glm::vec3(0, 1, 0)) * glm::angleAxis(direction.y, glm::vec3(1, 0, 0)) * rotation;
+  glm::vec3 local_right = rotation * glm::vec3(1.0f, 0.0f, 0.0f);
+  glm::vec3 local_up    = rotation * glm::vec3(0.0f, 1.0f, 0.0f);
+  rotation = glm::normalize(glm::angleAxis(-direction.x, local_up) * glm::angleAxis(-direction.y, local_right) * rotation);
 }
 
 void CustomCamera::roll(float amount)
 {
-  rotation = glm::angleAxis(amount, glm::vec3(0, 0, 1)) * rotation;
+  glm::vec3 local_forward = rotation * glm::vec3(0.0f, 0.0f, -1.0f);
+  rotation                = glm::normalize(glm::angleAxis(amount, local_forward) * rotation);
 }
 
 void CustomCamera::setPositionOnSphere(glm::vec3 position)
 {
-  rotation = convertPositionToQuat(position);
+  rotation = glm::normalize(convertPositionToQuat(position));
 }
 
 glm::quat CustomCamera::convertPositionToQuat(glm::vec3 position)
@@ -75,7 +78,7 @@ glm::quat CustomCamera::getQuatNoRoll(glm::quat quat)
 
 glm::mat4x4 CustomCamera::getViewMatrix()
 {
-  return glm::toMat4(rotation);
+  return glm::toMat4(glm::conjugate(rotation));
 }
 
 glm::mat4x4 CustomCamera::getViewMatrixNoRoll()

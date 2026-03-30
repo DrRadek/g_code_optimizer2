@@ -63,15 +63,15 @@ enum class StlFormat
 };
 
 /**
-	 * @brief Serialize a vector of triangles to an ASCII STL format and write it to the provided stream.
-	 *
-	 * This function writes the vector of triangles to the stream in ASCII STL format, where each triangle
-	 * is represented by its normal vector and three vertices.
-	 *
-	 * @tparam Stream The type of the output stream.
-	 * @param triangles The vector of triangles to serialize.
-	 * @param stream The output stream to write the serialized data to.
-	 */
+   * @brief Serialize a vector of triangles to an ASCII STL format and write it to the provided stream.
+   *
+   * This function writes the vector of triangles to the stream in ASCII STL format, where each triangle
+   * is represented by its normal vector and three vertices.
+   *
+   * @tparam Stream The type of the output stream.
+   * @param triangles The vector of triangles to serialize.
+   * @param stream The output stream to write the serialized data to.
+   */
 template <typename Stream, typename Container>
 void serializeAsciiStl(const Container& triangles, Stream& stream)
 {
@@ -90,12 +90,12 @@ void serializeAsciiStl(const Container& triangles, Stream& stream)
 }
 
 /**
-	 * @brief Serialize a vector of triangles in binary STL format and write to a stream.
-	 *
-	 * @tparam Stream The type of the output stream.
-	 * @param triangles The vector of triangles to serialize.
-	 * @param stream The output stream to write the serialized data.
-	 */
+   * @brief Serialize a vector of triangles in binary STL format and write to a stream.
+   *
+   * @tparam Stream The type of the output stream.
+   * @param triangles The vector of triangles to serialize.
+   * @param stream The output stream to write the serialized data.
+   */
 template <typename Stream, typename Container>
 void serializeBinaryStl(const Container& triangles, Stream& stream)
 {
@@ -116,13 +116,13 @@ void serializeBinaryStl(const Container& triangles, Stream& stream)
 
 
 /**
-	 * @brief Serialize a vector of triangles in the specified STL format and write to a stream.
-	 *
-	 * @tparam Stream The type of the output stream.
-	 * @param triangles The vector of triangles to serialize.
-	 * @param stream The output stream to write the serialized data.
-	 * @param format The format of the STL file (ASCII or binary).
-	 */
+   * @brief Serialize a vector of triangles in the specified STL format and write to a stream.
+   *
+   * @tparam Stream The type of the output stream.
+   * @param triangles The vector of triangles to serialize.
+   * @param stream The output stream to write the serialized data.
+   * @param format The format of the STL file (ASCII or binary).
+   */
 template <typename Stream, typename Container>
 inline void serialize(const Container& triangles, Stream& stream, StlFormat format)
 {
@@ -142,9 +142,9 @@ inline void serialize(const Container& triangles, Stream& stream, StlFormat form
 //---------------------------------------------------------------------------------------------------------
 
 /**
-	 * A library-level configuration to activate/deactivate the buffer overflow safety
-	 * @return
-	 */
+   * A library-level configuration to activate/deactivate the buffer overflow safety
+   * @return
+   */
 inline bool& activateOverflowSafety()
 {
   static bool safety_enabled = true;
@@ -152,12 +152,12 @@ inline bool& activateOverflowSafety()
 }
 
 /**
-	 * @brief Read a vertex from a stream.
-	 *
-	 * @tparam Stream The type of the input stream.
-	 * @param stream The input stream from which to read the vertex.
-	 * @param vertex The Vec3 object to store the read vertex.
-	 */
+   * @brief Read a vertex from a stream.
+   *
+   * @tparam Stream The type of the input stream.
+   * @param stream The input stream from which to read the vertex.
+   * @param vertex The Vec3 object to store the read vertex.
+   */
 template <typename Stream>
 inline void readVertex(Stream& stream, Vec3& vertex)
 {
@@ -172,12 +172,12 @@ inline void readVertex(Stream& stream, Vec3& vertex)
 }
 
 /**
-	 * @brief Deserialize an ASCII STL file from a stream and convert it to a vector of triangles.
-	 *
-	 * @tparam Stream The type of the input stream.
-	 * @param stream The input stream from which to read the ASCII STL data.
-	 * @return A vector of triangles representing the geometry from the ASCII STL file.
-	 */
+   * @brief Deserialize an ASCII STL file from a stream and convert it to a vector of triangles.
+   *
+   * @tparam Stream The type of the input stream.
+   * @param stream The input stream from which to read the ASCII STL data.
+   * @return A vector of triangles representing the geometry from the ASCII STL file.
+   */
 template <typename Stream>
 inline std::vector<Triangle> deserializeAsciiStl(Stream& stream)
 {
@@ -209,12 +209,12 @@ inline std::vector<Triangle> deserializeAsciiStl(Stream& stream)
 }
 
 /**
-	 * @brief Deserialize a binary STL file from a stream and convert it to a vector of triangles.
-	 *
-	 * @tparam Stream The type of the input stream.
-	 * @param stream The input stream from which to read the binary STL data.
-	 * @return A vector of triangles representing the geometry from the binary STL file.
-	 */
+   * @brief Deserialize a binary STL file from a stream and convert it to a vector of triangles.
+   *
+   * @tparam Stream The type of the input stream.
+   * @param stream The input stream from which to read the binary STL data.
+   * @return A vector of triangles representing the geometry from the binary STL file.
+   */
 template <typename Stream>
 std::vector<Triangle> deserializeBinaryStl(Stream& stream)
 {
@@ -269,12 +269,12 @@ std::vector<Triangle> deserializeBinaryStl(Stream& stream)
 }
 
 /**
-	 * @brief Check if the given stream contains ASCII STL data.
-	 *
-	 * @tparam Stream The type of the input stream.
-	 * @param stream The input stream to check for ASCII STL data.
-	 * @return True if the stream contains ASCII STL data, false otherwise.
-	 */
+   * @brief Check if the given stream contains ASCII STL data.
+   *
+   * @tparam Stream The type of the input stream.
+   * @param stream The input stream to check for ASCII STL data.
+   * @return True if the stream contains ASCII STL data, false otherwise.
+   */
 template <typename Stream>
 inline bool isAscii(Stream& stream)
 {
@@ -289,15 +289,15 @@ inline bool isAscii(Stream& stream)
 }
 
 /**
-	 * @brief Deserialize an STL file from a stream and convert it to a vector of triangles.
-	 *
-	 * This function detects the format of the STL file (ASCII or binary) by examining the content
-	 * of the input stream and calls the appropriate deserialization function accordingly.
-	 *
-	 * @tparam Stream The type of the input stream.
-	 * @param stream The input stream from which to read the STL data.
-	 * @return A vector of triangles representing the geometry from the STL file.
-	 */
+   * @brief Deserialize an STL file from a stream and convert it to a vector of triangles.
+   *
+   * This function detects the format of the STL file (ASCII or binary) by examining the content
+   * of the input stream and calls the appropriate deserialization function accordingly.
+   *
+   * @tparam Stream The type of the input stream.
+   * @param stream The input stream from which to read the STL data.
+   * @return A vector of triangles representing the geometry from the STL file.
+   */
 template <typename Stream>
 inline std::vector<Triangle> deserializeStl(Stream& stream)
 {
@@ -328,10 +328,10 @@ struct Vec3Hash
 };
 
 /**
-	 * @brief  Find the inverse map: vertex -> face idx
-	 * @param triangles The container of triangles from which to find unique vertices
-	 * @return A hash map that maps: for each unique vertex -> a vector of corresponding face indices
-	 */
+   * @brief  Find the inverse map: vertex -> face idx
+   * @param triangles The container of triangles from which to find unique vertices
+   * @return A hash map that maps: for each unique vertex -> a vector of corresponding face indices
+   */
 template <typename Container>
 inline std::unordered_map<Vec3, std::vector<size_t>, Vec3Hash> findInverseMap(const Container& triangles)
 {
@@ -356,10 +356,10 @@ inline std::unordered_map<Vec3, std::vector<size_t>, Vec3Hash> findInverseMap(co
 
 
 /**
-	 * @brief Finds unique vertices from a vector of triangles
-	 * @param triangles The container of triangles to convert
-	 * @return An tuple containing respectively the vector of vertices and the vector of face indices
-	 */
+   * @brief Finds unique vertices from a vector of triangles
+   * @param triangles The container of triangles to convert
+   * @return An tuple containing respectively the vector of vertices and the vector of face indices
+   */
 template <typename Container>
 inline std::tuple<std::vector<Vec3>, std::vector<Face>> convertToVerticesAndFaces(const Container& triangles)
 {
@@ -381,6 +381,27 @@ inline std::tuple<std::vector<Vec3>, std::vector<Face>> convertToVerticesAndFace
   return std::make_tuple(std::move(vertices), std::move(faces));
 }
 
+/**
+   * @brief Finds unique vertices from a vector of triangles
+   * @param triangles The container of triangles to convert
+   * @return vector of vertices
+   */
+template <typename Container>
+inline std::vector<Vec3> convertToVertices(const Container& triangles)
+{
+  const auto&       inverseMap  = findInverseMap(triangles);
+  auto              verticesNum = inverseMap.size();
+  std::vector<Vec3> vertices{};
+  vertices.reserve(verticesNum);
+  size_t               vertexIdx{0};
+  for(const auto& item : inverseMap)
+  {
+    vertices.emplace_back(item.first);
+    ++vertexIdx;
+  }
+  return vertices;
+}
+
 inline Vec3 operator-(const Vec3& rhs, const Vec3& lhs)
 {
   return {rhs.x - lhs.x, rhs.y - lhs.y, rhs.z - lhs.z};
@@ -392,11 +413,11 @@ inline Vec3 crossProduct(const Vec3& a, const Vec3& b)
 }
 
 /**
-	 * @brief Convert vertices and faces to triangles.
-	 * @param vertices The container of vertices.
-	 * @param faces The container of faces.
-	 * @return A vector of triangles constructed from the vertices and faces.
-	 */
+   * @brief Convert vertices and faces to triangles.
+   * @param vertices The container of vertices.
+   * @param faces The container of faces.
+   * @return A vector of triangles constructed from the vertices and faces.
+   */
 template <typename ContainerA, typename ContainerB>
 inline std::vector<Triangle> convertToTriangles(const ContainerA& vertices, const ContainerB& faces)
 {
@@ -429,8 +450,8 @@ inline std::vector<Triangle> convertToTriangles(const ContainerA& vertices, cons
 // Topology Utils
 //---------------------------------------------------------------------------------------------------------
 /**
-	 * DisjointSet class to manage disjoint sets with union-find.
-	 */
+   * DisjointSet class to manage disjoint sets with union-find.
+   */
 class DisjointSet
 {
   std::vector<size_t> parent;
@@ -473,12 +494,12 @@ public:
 };
 
 /**
-	 * Identifies and groups connected components of faces based on shared vertices.
-	 *
-	 * @param vertices A container of vertices.
-	 * @param faces A container of faces, where each face is a collection of vertex indices.
-	 * @return A vector of connected components, where each component is a vector of faces.
-	 */
+   * Identifies and groups connected components of faces based on shared vertices.
+   *
+   * @param vertices A container of vertices.
+   * @param faces A container of faces, where each face is a collection of vertex indices.
+   * @return A vector of connected components, where each component is a vector of faces.
+   */
 template <typename ContainerA, typename ContainerB>
 inline std::vector<std::vector<Face>> findConnectedComponents(const ContainerA& vertices, const ContainerB& faces)
 {
