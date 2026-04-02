@@ -29,7 +29,7 @@ enum class AlgorithmType
   Test,
   UniformPoints,
   Deterministic,
-  MonteCarlo,
+  Stochastic,
   Python
 };
 

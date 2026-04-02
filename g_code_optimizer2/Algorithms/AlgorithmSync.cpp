@@ -2,7 +2,7 @@
 
 #include "BasicAlgorithm.hpp"
 #include "DeterministicAlgorithm.hpp"
-#include "MonteCarloAlgorithm.hpp"
+#include "StochasticAlgorithm.hpp"
 #include "PythonAlgoSync.hpp"
 
 AlgoTask startAlgorithmTask(AlgorithmType algoType, std::unique_ptr<Algorithm>& algoOwner)
@@ -21,8 +21,8 @@ AlgoTask startAlgorithmTask(AlgorithmType algoType, std::unique_ptr<Algorithm>& 
     case AlgorithmType::Deterministic:
       algoOwner = std::make_unique<DeterministicAlgorithm>();
       break;
-    case AlgorithmType::MonteCarlo:
-      algoOwner = std::make_unique<MonteCarloAlgorithm>();
+    case AlgorithmType::Stochastic:
+      algoOwner = std::make_unique<StochasticAlgorithm>();
       break;
     case AlgorithmType::Python:
       algoOwner = std::make_unique<PythonAlgoSync>();

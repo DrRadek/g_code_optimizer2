@@ -26,7 +26,7 @@ glm::vec3 randomDirection()
 //    - optimize locally
 //    - store best
 // 2) Choose the best one and optimize further
-class MonteCarloAlgorithm : public Algorithm
+class StochasticAlgorithm : public Algorithm
 {
   // Algo parameters
   struct Config
@@ -133,14 +133,14 @@ class MonteCarloAlgorithm : public Algorithm
   };
 
 public:
-  MonteCarloAlgorithm()
+  StochasticAlgorithm()
       : Algorithm()
       , config(getJsonConfig<Config>(AppConfig::instance().getAlgorithmsPath() + "\\stochastic.json"))
   {
   }
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(MonteCarloAlgorithm::Config,
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(StochasticAlgorithm::Config,
                                    N,
                                    K,
                                    NGlobal,

@@ -92,7 +92,7 @@
 static const std::vector<std::pair<std::string, AlgorithmType>> stringToAlgoType{{"test", AlgorithmType::Test},
                                                                                  {"basic", AlgorithmType::UniformPoints},
                                                                                  {"deterministic", AlgorithmType::Deterministic},
-                                                                                 {"montecarlo", AlgorithmType::MonteCarlo},
+                                                                                 {"stochastic", AlgorithmType::Stochastic},
                                                                                  {"python", AlgorithmType::Python}};
 
 //---------------------------------------------------------------------------------------

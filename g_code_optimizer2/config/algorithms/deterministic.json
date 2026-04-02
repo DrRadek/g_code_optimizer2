@@ -1,0 +1,12 @@
+{
+  "N": 2000,
+  "K": 60,
+
+  "KPointsDeltaStart":0.1,
+  "KPointsDeltaEnd":0.03,
+  "KPointsMaxSteps":100,
+
+  "LastPointDeltaStart":0.03,
+  "LastPointDeltaEnd":0.00001,
+  "LastPointMaxSteps":100
+}
