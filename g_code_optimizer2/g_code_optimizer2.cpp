@@ -1677,7 +1677,9 @@ int main(int argc, char** argv)
   algoString[algoString.length() - 2] = '}';
 
   // Parsing the command line
-  nvutils::ParameterParser   cli(nvutils::getExecutablePath().stem().string());
+  auto exePath = nvutils::getExecutablePath();
+
+  nvutils::ParameterParser   cli(exePath.stem().string());
   nvutils::ParameterRegistry reg;
 
   // Config
@@ -1705,6 +1707,19 @@ int main(int argc, char** argv)
   cli.add(reg);
   cli.parse(argc, argv);
 
+  // Setup config
+  AppConfig::instance().setBasePath(config != "" ? std::filesystem::path(config) : exePath.parent_path() / "config");
+
+  // Read config from json
+  auto configFile = AppConfig::instance().getInputParamsConfigPath();
+  if(std::filesystem::exists(configFile))
+  {
+    inputs = getJsonConfig<GCodeOptimizer2::Inputs>(AppConfig::instance().getInputParamsConfigPath());
+  }
+
+  // Parse again to overwrite json defaults
+  cli.parse(argc, argv);
+
   if(inputs.headless)
   {
     // Force close when headless
@@ -1720,9 +1735,6 @@ int main(int argc, char** argv)
     appInfo.headlessFrameCount = std::numeric_limits<uint32_t>::max();
   }
 
-  // Config
-  AppConfig::instance().setBasePath(config != "" ? std::filesystem::path(config) :
-                                                   std::filesystem::canonical(argv[0]).parent_path() / "config");
 
   // Setting up the Vulkan context, instance and device extensions
   VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT};
@@ -1835,3 +1847,5 @@ int main(int argc, char** argv)
 
   return handleExit(error_code);
 }
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(GCodeOptimizer2::Inputs, algorithm, raytraced, inputStl, outputStl, outputQuat, headless, closeOnDone, vertsFile, indsFile)

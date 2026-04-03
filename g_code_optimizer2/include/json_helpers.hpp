@@ -25,10 +25,8 @@ T getJsonConfig(const std::filesystem::path& path)
     std::string err = "Failed to parse " + path.string();
     std::cerr << err << "\n";
     throw std::runtime_error(err);
-
   }
 };
-
 
 class AppConfig
 {
@@ -50,6 +48,7 @@ public:
   const std::filesystem::path& getBasePath() const { return configBasePath; }
 
   const std::filesystem::path getAlgorithmsPath() const { return getBasePath() / "algorithms"; }
+  const std::filesystem::path getInputParamsConfigPath() const { return getBasePath() / "inputs_params.json"; }
 
 private:
   std::filesystem::path configBasePath = "";
