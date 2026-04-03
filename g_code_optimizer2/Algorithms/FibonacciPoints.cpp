@@ -15,9 +15,10 @@ AlgoTask generateFibonacciPoints(Algorithm& algo, int N, std::function<void(glm:
     float x = r * cosf(theta);
     float y = r * sinf(theta);
 
-    //std::cout << "requesting volume" << "\n";
-    co_await algo.requestVolumeForPosition({x,y,z});
+    co_await algo.requestVolumeForPosition({x, y, z});
 
     callback({x, y, z});
   }
+
+  co_return {};
 }

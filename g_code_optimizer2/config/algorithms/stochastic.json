@@ -3,7 +3,7 @@
   "K": 100,
   "NGlobal": 20,
   "KGlobal"                : 5,
-  "differenceFromBestFrac" : 0.6,
+  "differenceFromBestFrac" : 0,
 
   "KPointsDeltaStart": 0.1,
   "KPointsDeltaEnd"   : 0.03,

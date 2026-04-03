@@ -35,7 +35,7 @@ class StochasticAlgorithm : public Algorithm
     int K                      = 100;    // end when no improvement after K points
     int NGlobal                = 20;     // Maximum NGlobal shots
     int KGlobal                = 5;      // end when no improvement after KGlobal shots
-    int differenceFromBestFrac = 0.6;    // how much can generated point differ
+    float differenceFromBestFrac = 0;    // how much can generated point differ
 
     // Parameters for local optimization of N points
     float KPointsDeltaStart = 0.1f;
@@ -135,7 +135,7 @@ class StochasticAlgorithm : public Algorithm
 public:
   StochasticAlgorithm()
       : Algorithm()
-      , config(getJsonConfig<Config>(AppConfig::instance().getAlgorithmsPath() + "\\stochastic.json"))
+      , config(getJsonConfig<Config>(AppConfig::instance().getAlgorithmsPath() / "stochastic.json"))
   {
   }
 };

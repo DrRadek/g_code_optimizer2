@@ -1,0 +1,7 @@
+{
+    "name": "g_code_optimizer2_plugin",
+    "author": "Radek Novotny",
+    "version": "0.0.1",
+    "supported_sdk_versions": ["8.0.0"],
+    "description": "An extension used to optimize 3D orientation of a model."
+}

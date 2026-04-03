@@ -437,7 +437,7 @@ public:
 
     size_t       elemCount              = size.width * size.height;
     VkDeviceSize bufferSize             = elemCount * sizeof(float);
-    VkDeviceSize bufferSizeForReduction = m_volumeSumCompute.calculateMaxGroups(elemCount) * sizeof(float);
+    VkDeviceSize bufferSizeForReduction = m_volumeSumCompute.calculateMaxGroups((int)elemCount) * sizeof(float);
 
     m_allocator.createBuffer(m_outVolumeBuffer, bufferSize,
                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
@@ -1225,7 +1225,7 @@ public:
   {
     if(m_algo->isAlgorithmRunning())
     {
-      //std::cout << "algo running...\n";
+      std::cout << "algo running...\n";
       // Run algorithm
       auto response = m_algo->runAlgorithm({volume, m_camera->getRotation()});
 
@@ -1388,8 +1388,6 @@ public:
           indices_stream.close();
           for(uint32_t i = 0; i < indices.size(); i += 3)
           {
-            uint32_t v0, v1, v2;
-
             openstl::Triangle t;
             t.v0 = vertices[indices[i]];
             t.v1 = vertices[indices[i + 1]];
@@ -1481,17 +1479,17 @@ public:
     // dynamically calculate n, m to keep fixed area size
     if(useFixedAreaResolution)
     {
-      currentResolutionWidth  = round(width / areaResolution);
-      currentResolutionHeight = round(height / areaResolution);
+      currentResolutionWidth  = (int)round(width / areaResolution);
+      currentResolutionHeight = (int)round(height / areaResolution);
 
-      if(currentResolutionWidth > m_maxRenderResolution.width)
+      if((uint32_t)currentResolutionWidth > m_maxRenderResolution.width)
       {
         std::cout << " Warning: width " << currentResolutionWidth
                   << " is larger than max width: " << m_maxRenderResolution.width;
         currentResolutionWidth = m_maxRenderResolution.width;
       }
 
-      if(currentResolutionHeight > m_maxRenderResolution.height)
+      if((uint32_t)currentResolutionHeight > m_maxRenderResolution.height)
       {
         std::cout << " Warning: height " << currentResolutionHeight
                   << " is larger than max height: " << m_maxRenderResolution.height;
@@ -1531,18 +1529,18 @@ private:
   bool                                   forwardVolumeToPython    = false;
   float                                  pythonForwarderPointSize = 5;
   bool                                   pythonForwarderClear     = false;
-  glm::quat                              lastRotation;  // Camera rotation used in last frame
+  glm::quat                              lastRotation{};  // Camera rotation used in last frame
 
   // Set by algorithm (info for camera)
-  shaderio::float2 moveDirection;
-  glm::quat        newQuat;
-  shaderio::float3 newPosition;
-  bool           cameraChangeRequested = false;
-  AlgoRequestAny algoRequest;
+  shaderio::float2 moveDirection{};
+  glm::quat        newQuat{};
+  shaderio::float3 newPosition{};
+  bool             cameraChangeRequested = false;
+  AlgoRequestAny   algoRequest;
 
   // Other
   bool  useFixedAreaResolution = true;  // fixed width x height
-  float areaResolution         = 0.1;   // used to calculate width x height
+  float areaResolution         = 0.1f;   // used to calculate width x height
   float maxSupportHeight       = 0;     // maximum support height (used to display relative colors)
   float minCellSize            = 0;     // maximum area resolution (used to limit areaResolution)
 
@@ -1555,7 +1553,7 @@ private:
   float                       volume    = 0;
   float                       maxVolume = 0;
   float                       minVolume = std::numeric_limits<float>().max();
-  shaderio::float4x4          bestRotation;  // Used to save the result
+  shaderio::float4x4          bestRotation{};  // Used to save the result
   //shaderio::float4x4          bestMatrixFromAlgo;
   //float                       minVolumeFromAlgo = std::numeric_limits<float>().max();
 
@@ -1567,8 +1565,8 @@ private:
   std::vector<openstl::Triangle> triangles;
 
   // CPU helper variables
-  shaderio::float4x4 viewMatrix;
-  shaderio::float4x4 viewInvMatrix;
+  shaderio::float4x4 viewMatrix{};
+  shaderio::float4x4 viewInvMatrix{};
 
   //
   int        maxResolutionWidth      = 4096;
@@ -1635,13 +1633,17 @@ int main(int argc, char** argv)
   // Parsing the command line
   nvutils::ParameterParser   cli(nvutils::getExecutablePath().stem().string());
   nvutils::ParameterRegistry reg;
+
+  // Headless requires algorithm to run
   reg.add({"headless", "Run in headless mode"}, &appInfo.headless, true);
+
+
   reg.add({"stlfile", "STL file to optimize"}, &inputs.stlFilePath);
   reg.add({"vertsfile", "Verts file to read (internal use only)"}, &inputs.vertFilePath);
   reg.add({"indsfile", "Indicies file to read (internal use only)"}, &inputs.indFilePath);
   reg.add({"outputstlfile", "Where to save resulting STL file"}, &inputs.outputStlFilePath);
   reg.add({"outputquatfile", "Where to save resulting quaternion"}, &inputs.outputQuatFilePath);
-  reg.add({"config", "./config"}, &config);
+  reg.add({"config", "Location of folder with configurations"}, &config);
 
   std::string algoString = "Algorithm to run {";
   for(const auto& type : stringToAlgoType)
@@ -1654,7 +1656,8 @@ int main(int argc, char** argv)
   cli.parse(argc, argv);
 
   // Config
-  AppConfig::instance().setBasePath(config);
+  AppConfig::instance().setBasePath(config != "" ? std::filesystem::path(config) :
+                                                   std::filesystem::canonical(argv[0]).parent_path() / "config");
 
   // Setting up the Vulkan context, instance and device extensions
   VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT};
@@ -1737,8 +1740,8 @@ int main(int argc, char** argv)
   // Elements added to the application
   auto g_code_optimizer2 = std::make_shared<GCodeOptimizer2>(inputs);  // Our tutorial element
   auto windowTitle = std::make_shared<nvapp::ElementDefaultWindowTitle>();  // Element displaying the window title with application name and size
-  auto windowMenu = std::make_shared<nvapp::ElementDefaultMenu>();  // Element displaying a menu, File->Exit ...
-  auto customCamera           = std::make_shared<nvapp::CustomCamera>();
+  auto windowMenu   = std::make_shared<nvapp::ElementDefaultMenu>();  // Element displaying a menu, File->Exit ...
+  auto customCamera = std::make_shared<nvapp::CustomCamera>();
   g_code_optimizer2->m_camera = customCamera;
   g_code_optimizer2->m_algo   = std::move(algoSync);
   g_code_optimizer2->hasRtx   = vkContext.hasExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);

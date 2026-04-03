@@ -5,7 +5,7 @@
 class HookeJeeves
 {
 public:
-  HookeJeeves(Algorithm& algo, float deltaStep, float tolerance, float maxSteps)
+  HookeJeeves(Algorithm& algo, float deltaStep, float tolerance, int maxSteps)
       : algo(algo)
       , deltaStep(deltaStep)
       , tolerance(tolerance)
@@ -15,7 +15,12 @@ public:
     baseVolume   = algo.getCurrentVolume();
   }
 
-  AlgoTask      optimize() { co_await runProcedure1(); }
+  AlgoTask optimize()
+  {
+    co_await runProcedure1();
+    co_return {};
+  }
+
   float     getBestVolume() { return baseVolume; }
   glm::quat getBestRotation() { return baseRotation; }
 
@@ -65,7 +70,7 @@ private:
           // Trigger calculation to prevent freeze
           // Finish
           co_await algo.requestVolumeForQuat(baseRotation);
-          co_return{};
+          co_return {};
         }
 
         // Update step
@@ -103,6 +108,7 @@ private:
         break;
       }
     }
+    co_return {};
   }
 
   AlgoTask PatternMove()
@@ -111,6 +117,8 @@ private:
 
     currentRotation = algo.getCurrentRotation();
     currentVolume   = algo.getCurrentVolume();
+
+    co_return {};
   }
 
   AlgoTask Explore()
@@ -122,6 +130,7 @@ private:
     {
       co_await ExploreInAxis(i);
     }
+    co_return {};
   }
 
   // Helpers

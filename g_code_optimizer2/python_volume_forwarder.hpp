@@ -42,7 +42,7 @@ class PythonVolumeForwarder
   bool initializedWithError = false;
 
   std::optional<glm::quat> last_quat;
-  float                    min_angle_difference = 0.1;
+  float                    min_angle_difference = 0.1f;
 
 
 public:

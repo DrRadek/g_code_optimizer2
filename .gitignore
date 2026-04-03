@@ -22,3 +22,7 @@ _bin/
 __pycache__/
 
 venv*/
+
+# UM folder from cura
+python_extensions/cura_slicer/g_code_optimizer2_plugin/UM
+python_extensions/cura_slicer/g_code_optimizer2_plugin/settings.json

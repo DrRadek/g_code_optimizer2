@@ -19,7 +19,7 @@ struct AlgoRequestBase
 
 struct AlgoRequestNewPos : public AlgoRequestBase
 {
-  shaderio::float3 newPosition;
+  shaderio::float3 newPosition{};
 };
 
 struct AlgoRequestNewQuat : public AlgoRequestBase
@@ -121,7 +121,7 @@ struct AlgoTask
       : h(h)
   {
   }
-  //AlgoTask(AlgoTask&&) = default;
+
   ~AlgoTask()
   {
     if(h)
@@ -173,6 +173,7 @@ public:
   AlgoTask requestVolumeForQuat(glm::quat newQuat, bool skipCalculation = false)
   {
     storeRequest(co_await AlgoTask::Compute{AlgoRequestNewQuat{skipCalculation, newQuat}});
+    co_return {};
   }
 
   // Request camera to be set using direction vector
@@ -180,6 +181,7 @@ public:
   AlgoTask requestVolumeForPosition(shaderio::float3 newPosition, bool skipCalculation = false)
   {
     storeRequest(co_await AlgoTask::Compute{AlgoRequestNewPos{skipCalculation, newPosition}});
+    co_return {};
   }
 
   // Request camera movement
@@ -187,6 +189,7 @@ public:
   AlgoTask requestVolumeForMove(shaderio::float2 move, bool skipCalculation = false)
   {
     storeRequest(co_await AlgoTask::Compute{AlgoRequestMoveDir{skipCalculation, move}});
+    co_return {};
   }
 
   // Loop

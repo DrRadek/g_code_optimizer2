@@ -112,7 +112,7 @@ class DeterministicAlgorithm : public Algorithm
 public:
   DeterministicAlgorithm()
       : Algorithm()
-      , config(getJsonConfig<Config>(AppConfig::instance().getAlgorithmsPath() + "\\deterministic.json"))
+      , config(getJsonConfig<Config>(AppConfig::instance().getAlgorithmsPath() / "deterministic.json"))
   {
   }
 };

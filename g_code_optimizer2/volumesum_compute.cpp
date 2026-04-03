@@ -86,9 +86,9 @@ void nvshaders::VolumeSumCompute::runCompute(VkCommandBuffer cmd, int elementCou
   size_t partialCount = elementCount;
   while(partialCount > 1)
   {
-    shaderio::uint groupCount = std::ceil((double)partialCount / itemsPerGroup);
+    shaderio::uint groupCount = (shaderio::uint)std::ceil((double)partialCount / itemsPerGroup);
 
-    params_data.arraySize = partialCount;
+    params_data.arraySize = (shaderio::uint)partialCount;
     params_data.groupSize = K;
     // Push constant
     vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(shaderio::volume_Params), &params_data);

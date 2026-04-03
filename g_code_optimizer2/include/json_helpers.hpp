@@ -4,12 +4,12 @@
 #include <fstream>
 
 template <typename T>
-const T& getJsonConfig(const std::string& path)
+T getJsonConfig(const std::filesystem::path& path)
 {
   std::ifstream f(path);
   if(!f.is_open())
   {
-    std::string err = "Failed to read " + path;
+    std::string err = "Failed to read " + path.string();
     std::cerr << err << "\n";
     throw std::runtime_error(err);
   }
@@ -22,9 +22,10 @@ const T& getJsonConfig(const std::string& path)
   }
   catch(...)
   {
-    std::string err = "Failed to parse " + path + "\n";
+    std::string err = "Failed to parse " + path.string();
     std::cerr << err << "\n";
     throw std::runtime_error(err);
+
   }
 };
 
@@ -40,16 +41,16 @@ public:
     return s;
   }
 
-  void setBasePath(const std::string& path)
+  void setBasePath(const std::filesystem::path& path)
   {
     m_initialized  = true;
     configBasePath = path;
   }
 
-  const std::string& getBasePath() const { return configBasePath; }
+  const std::filesystem::path& getBasePath() const { return configBasePath; }
 
-  const std::string getAlgorithmsPath() const { return getBasePath() + "\\algorithms"; }
+  const std::filesystem::path getAlgorithmsPath() const { return getBasePath() / "algorithms"; }
 
 private:
-  std::string configBasePath = "./config";
+  std::filesystem::path configBasePath = "";
 };

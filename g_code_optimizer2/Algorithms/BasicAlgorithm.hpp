@@ -35,7 +35,7 @@ class UniformPointsAlgorithm : public Algorithm
 public:
   UniformPointsAlgorithm()
       : Algorithm()
-      , config(getJsonConfig<Config>(AppConfig::instance().getAlgorithmsPath() + "\\basic.json"))
+      , config(getJsonConfig<Config>(AppConfig::instance().getAlgorithmsPath() / "basic.json"))
   {
   }
 };
