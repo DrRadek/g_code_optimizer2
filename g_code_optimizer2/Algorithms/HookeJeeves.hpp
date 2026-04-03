@@ -75,7 +75,7 @@ private:
 
         // Update step
         deltaStep *= 0.5;
-        std::cout << "delta step is:" << deltaStep << "\n";
+        // std::cout << "delta step is:" << deltaStep << "\n";
       }
     }
   }

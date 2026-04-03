@@ -51,15 +51,21 @@ public:
 
     h.resume();
     algorithmRunning = true;
+    iterationCount   = 0;
 
     return p.algo_request.value();
   }
 
   void stopAlgorithm()
   {
+    if(!isAlgorithmRunning())
+      return;
+
     task.reset();
     algorithm.reset();
     algorithmRunning = false;
+
+    std::cout << "Total algorithm iterations: " << iterationCount << "\n";
   }
 
   bool       isAlgorithmRunning() { return algorithmRunning; }
@@ -68,6 +74,8 @@ public:
 
   AlgoRequestAny runAlgorithm(RendererResult result)
   {
+    ++iterationCount;
+
     auto& h = task->h;
     auto& p = h.promise();
 
@@ -85,4 +93,6 @@ private:
   bool                       algorithmRunning = false;
   std::optional<AlgoTask>    task;
   std::unique_ptr<Algorithm> algorithm;
+
+  int iterationCount = 0;
 };

@@ -108,12 +108,19 @@ class GCodeOptimizer2 : public nvapp::IAppElement
 public:
   struct Inputs
   {
-    std::string stlFilePath        = "";
-    std::string vertFilePath       = "";
-    std::string indFilePath        = "";
-    std::string outputStlFilePath  = "";
-    std::string outputQuatFilePath = "";
-    std::string algo               = "";
+    std::string algorithm = "";
+    bool        raytraced = false;
+
+    std::string inputStl = "";
+
+    std::string outputStl  = "";
+    std::string outputQuat = "";
+
+    bool headless    = false;
+    bool closeOnDone = false;
+
+    std::string vertsFile = "";
+    std::string indsFile  = "";
   } inputs;
 
 
@@ -177,13 +184,21 @@ public:
     resizeBuffers(cmd, m_maxRenderResolution);
     m_app->submitAndWaitTempCmdBuffer(cmd);
 
+    if(inputs.raytraced && !hasRtx)
+    {
+      std::string error = "Error: ray tracing not supported on this GPU\n";
+      throw std::runtime_error(error);
+    }
+
+    m_useRayTracing = inputs.raytraced;
+
     createScene();                        // Create the scene with a teapot and a plane
     createGraphicsDescriptorSetLayout();  // Create the descriptor set layout for the graphics pipeline
     createGraphicsPipelineLayout();       // Create the graphics pipeline layout
     compileAndCreateGraphicsShaders();    // Compile the graphics shaders and create the shader modules
     updateTextures();                     // Update the textures in the descriptor set (if any)
 
-    if(hasRtx)
+    if(hasRtx && (m_useRayTracing || !inputs.headless))
     {
       // Get ray tracing properties
       VkPhysicalDeviceProperties2 prop2{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
@@ -223,7 +238,6 @@ public:
       {
         std::string error =
             "Error: cell size is too small to fit in texture. Min cell size is " + std::to_string(minCellSize) + "\n";
-        std::cout << error;
         throw std::runtime_error(error);
       }
 
@@ -231,14 +245,13 @@ public:
     }
 
     // Load algo type to start
-    if(inputs.algo != "")
+    if(inputs.algorithm != "")
     {
-      startAlgorithm       = true;
-      initiatedByAlgorithm = true;
+      startAlgorithm = true;
 
       for(const auto& [name, enumType] : stringToAlgoType)
       {
-        if(name == inputs.algo)
+        if(name == inputs.algorithm)
         {
           selectedAlgo = enumType;
         }
@@ -246,9 +259,7 @@ public:
 
       if(selectedAlgo == AlgorithmType::None)
       {
-        std::string error = "Error: unkown algorithm (" + inputs.algo + ")";
-        std::cout << error;
-        throw std::runtime_error(error);
+        throw std::runtime_error("unknown algorithm (" + inputs.algorithm + ")");
       }
     }
   }
@@ -472,7 +483,8 @@ public:
       ForwardToPython();
 
     // Algorithm synchronization
-    RunAlgorithm();
+    if(!RunAlgorithm())
+      return;  // Algorithm done, exit
 
     // Update view matrix
     updateViewMatrixFromCamera();
@@ -486,7 +498,7 @@ public:
     // Update the scene information buffer, this cannot be done in between dynamic rendering
     updateSceneBuffer(cmd);
 
-    if(m_useRayTracing && hasRtx)
+    if(m_useRayTracing)
     {
       raytraceScene(cmd);
     }
@@ -528,7 +540,7 @@ public:
     {
       vkQueueWaitIdle(m_app->getQueue(0).queue);
 
-      if(m_useRayTracing && hasRtx)
+      if(m_useRayTracing)
       {
         createRayTracingPipeline();
       }
@@ -743,12 +755,12 @@ public:
     // Making sure the scene information buffer is updated before rendering
     // Wait that the fragment and raytracing shader is done reading the previous scene information and wait for the transfer to complete
     nvvk::cmdBufferMemoryBarrier(cmd, {m_sceneResource.bSceneInfo.buffer,
-                                       (m_useRayTracing && hasRtx) ? VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                                       (m_useRayTracing) ? VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR : VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                                        VK_PIPELINE_STAGE_2_TRANSFER_BIT});
     vkCmdUpdateBuffer(cmd, m_sceneResource.bSceneInfo.buffer, 0, sizeof(shaderio::GltfSceneInfo), &m_sceneResource.sceneInfo);
     nvvk::cmdBufferMemoryBarrier(cmd, {m_sceneResource.bSceneInfo.buffer, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                                       (m_useRayTracing & hasRtx) ? VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR :
-                                                                    VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT});
+                                       (m_useRayTracing) ? VK_PIPELINE_STAGE_2_RAY_TRACING_SHADER_BIT_KHR :
+                                                           VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT});
   }
 
 
@@ -1217,52 +1229,63 @@ public:
     {
       // Note: this has to be called on next frame after rendering is done
       // First frame doesn't have a reference to a buffer yet
-      std::cout << "invalid buffer\n\n";
+      std::cout << "First frame, skipping getting calculation result\n\n";
     }
   }
 
-  void RunAlgorithm()
+  bool RunAlgorithm()
+  {
+    AlgoRequestAny response{};
+
+    if(m_algo->isAlgorithmRunning())
+    {
+      // Run algorithm
+      response = m_algo->runAlgorithm({volume, m_camera->getRotation()});
+    }
+    else if(startAlgorithm)
+    {
+      std::cout << "starting algorithm...\n";
+      // Request to start the algorithm
+      algoStartTime   = std::chrono::steady_clock::now();
+      programInitTime = std::chrono::duration_cast<std::chrono::milliseconds>(algoStartTime - programStartTime);
+      response        = m_algo->startAlgorithm(selectedAlgo);
+      m_camera->disableInteractive();
+      startAlgorithm = false;
+    }
+    else
+    {
+      // No algorithm running
+      return true;
+    }
+
+    // Process response
+    return HandleAlgorithResponse(response);
+  }
+
+  bool StopAlgorithm()
   {
     if(m_algo->isAlgorithmRunning())
     {
-      std::cout << "algo running...\n";
-      // Run algorithm
-      auto response = m_algo->runAlgorithm({volume, m_camera->getRotation()});
-
-      // Process response
-      HandleAlgorithResponse(response);
+      std::cout << "Program init took " << programInitTime << " ms\n";
+      std::cout << "Algorithm finished in: "
+                << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - algoStartTime)
+                << " ms\n";
     }
-    else
-    {
-      if(startAlgorithm)
-      {
-        std::cout << "starting algo...\n";
-        // Request to start the algorithm
-        auto response = m_algo->startAlgorithm(selectedAlgo);
-        m_camera->disableInteractive();
-        startAlgorithm = false;
 
-        // Process response
-        HandleAlgorithResponse(response);
-      }
-    }
-  }
-
-  void StopAlgorithm()
-  {
     m_algo->stopAlgorithm();
+
     selectedAlgo = {};
-    if(initiatedByAlgorithm)
+    if(inputs.closeOnDone)
     {
-      // TODO: stop
+      this->m_app->close();
+      return false;
     }
-    else
-    {
-      m_camera->enableInteractive();
-    }
+
+    m_camera->enableInteractive();
+    return true;
   }
 
-  void HandleAlgorithResponse(AlgoRequestAny request)
+  bool HandleAlgorithResponse(AlgoRequestAny request)
   {
     bool done = m_algo->isAlgorithmDone();
     if(done)
@@ -1273,14 +1296,9 @@ public:
       auto result = m_algo->getAlgorithmResult();
       m_camera->setRotation(result.bestRotation);
 
-      /*setQuat      = false;
-      setPosition  = false;
-      movePosition = false;*/
       cameraChangeRequested = false;
 
-      StopAlgorithm();
-
-      return;
+      return StopAlgorithm();
     }
     else
     {
@@ -1300,9 +1318,10 @@ public:
       auto response = m_algo->runAlgorithm({0, m_camera->getRotation()});
 
       // wait again in case of skip
-      HandleAlgorithResponse(response);
+      return HandleAlgorithResponse(response);
     }
-    //std::cout << " END\n";
+
+    return true;
   }
 
   void updateViewMatrixFromCamera()
@@ -1355,19 +1374,18 @@ public:
   void LoadStlData(VkCommandBuffer cmd)
   {
     // Load and parse the data from file
-    if(inputs.stlFilePath == "")
+    if(inputs.inputStl == "")
     {
-      if(inputs.vertFilePath == "")
+      if(inputs.vertsFile == "")
       {
         std::string error = "Error: no input parameter found. Please specify either stl file path or binary vert array path.";
-        std::cout << error << "\n";
         throw std::runtime_error(error);
       }
       else
       {
-        std::ifstream vertices_stream(inputs.vertFilePath, std::ios::binary | std::ios::ate);
+        std::ifstream vertices_stream(inputs.vertsFile, std::ios::binary | std::ios::ate);
         if(!vertices_stream)
-          throw new std::exception("Failed to open verts file");
+          throw std::runtime_error("Failed to open verts file");
         std::streamsize        size = vertices_stream.tellg();
         std::vector<glm::vec3> vertices(size / sizeof(glm::vec3));
 
@@ -1376,11 +1394,11 @@ public:
         vertices_stream.read(reinterpret_cast<char*>(vertices.data()), size);
         vertices_stream.close();
 
-        if(inputs.indFilePath != "")
+        if(inputs.indsFile != "")
         {
-          std::ifstream indices_stream(inputs.indFilePath, std::ios::binary | std::ios::ate);
+          std::ifstream indices_stream(inputs.indsFile, std::ios::binary | std::ios::ate);
           if(!vertices_stream)
-            throw new std::exception("Failed to open indices file");
+            throw std::runtime_error("Failed to open indices file");
           std::streamsize      size = indices_stream.tellg();
           std::vector<int32_t> indices(size / sizeof(int32_t));
           indices_stream.seekg(0, std::ios::beg);
@@ -1401,8 +1419,8 @@ public:
           {
             openstl::Triangle t;
             t.v0 = vertices[i];
-            t.v1 = vertices[i + 1];
-            t.v2 = vertices[i + 2];
+            t.v1 = vertices[i + 2];
+            t.v2 = vertices[i + 1];
             triangles.push_back(t);
           }
         }
@@ -1419,7 +1437,7 @@ public:
     else
     {
       // Load triangles from the stl file
-      triangles = nvsamples::loadStlResources(inputs.stlFilePath);
+      triangles = nvsamples::loadStlResources(inputs.inputStl);
     }
 
     // Import the data
@@ -1429,10 +1447,11 @@ public:
   }
   void SaveResult()
   {
-    std::cout << "End...";
+    if(errorThrown)
+      return;
 
     // Save final result
-    if(inputs.outputStlFilePath != "")
+    if(inputs.outputStl != "")
     {
       std::cout << "Saving stl...";
       // Rotate
@@ -1444,15 +1463,15 @@ public:
       }
 
       // Save as stl
-      nvsamples::SaveStlResources(inputs.outputStlFilePath, triangles);
+      nvsamples::SaveStlResources(inputs.outputStl, triangles);
     }
 
-    if(inputs.outputQuatFilePath != "")
+    if(inputs.outputQuat != "")
     {
       std::cout << "Saving quaternion...";
       // Save as quaternion (this is used to rotate the model inside Cura)
       auto          bestQuat = glm::quat_cast(bestRotation);
-      std::ofstream quatOfstream(inputs.outputQuatFilePath);
+      std::ofstream quatOfstream(inputs.outputQuat);
       quatOfstream << bestQuat.x << " " << bestQuat.y << " " << bestQuat.z << " " << bestQuat.w << "\n";
       quatOfstream.close();
     }
@@ -1514,14 +1533,20 @@ public:
 
   // Camera
   std::shared_ptr<nvapp::CustomCamera> m_camera{};
-  bool                                 hasRtx = false;
+  bool                                 hasRtx      = false;
+  bool                                 errorThrown = false;
   // Algorithm
   std::unique_ptr<AlgorithmSync> m_algo;
-  bool                           startAlgorithm       = false;
-  bool                           initiatedByAlgorithm = false;  // Whether to kill after algorithm finishes
-  AlgorithmType                  selectedAlgo{};                // Type of the algorithm
+  AlgorithmType                  selectedAlgo{};  // Type of the algorithm
+
+  // Time
+  std::chrono::steady_clock::time_point programStartTime;
 
 private:
+  // Time
+  std::chrono::steady_clock::time_point algoStartTime;
+  std::chrono::milliseconds             programInitTime;
+
   // Python
   std::unique_ptr<PythonVolumeForwarder> pythonVolumeForwarder;
   bool                                   forwardToPython          = false;
@@ -1530,6 +1555,9 @@ private:
   float                                  pythonForwarderPointSize = 5;
   bool                                   pythonForwarderClear     = false;
   glm::quat                              lastRotation{};  // Camera rotation used in last frame
+
+  // Should start algorithm
+  bool startAlgorithm = false;
 
   // Set by algorithm (info for camera)
   shaderio::float2 moveDirection{};
@@ -1540,7 +1568,7 @@ private:
 
   // Other
   bool  useFixedAreaResolution = true;  // fixed width x height
-  float areaResolution         = 0.1f;   // used to calculate width x height
+  float areaResolution         = 0.1f;  // used to calculate width x height
   float maxSupportHeight       = 0;     // maximum support height (used to display relative colors)
   float minCellSize            = 0;     // maximum area resolution (used to limit areaResolution)
 
@@ -1621,39 +1649,76 @@ private:
 };
 
 
+int handleExit(int error_code)
+{
+  if(error_code != 0)
+  {
+    std::cout << "Press any key to exit...\n";
+    std::cin.get();
+  }
+  return error_code;
+}
+
 //---------------------------------------------------------------------------------------------------------------
 // The main function, entry point of the application
 int main(int argc, char** argv)
 {
+  auto programStartTime = std::chrono::steady_clock::now();
+
   nvapp::ApplicationCreateInfo appInfo{};
   GCodeOptimizer2::Inputs      inputs;
 
   std::string config;
+  std::string algoString = "Algorithm to run {";
+  for(const auto& type : stringToAlgoType)
+  {
+    algoString += type.first + ", ";
+  }
+  algoString[algoString.length() - 2] = '}';
 
   // Parsing the command line
   nvutils::ParameterParser   cli(nvutils::getExecutablePath().stem().string());
   nvutils::ParameterRegistry reg;
 
-  // Headless requires algorithm to run
-  reg.add({"headless", "Run in headless mode"}, &appInfo.headless, true);
-
-
-  reg.add({"stlfile", "STL file to optimize"}, &inputs.stlFilePath);
-  reg.add({"vertsfile", "Verts file to read (internal use only)"}, &inputs.vertFilePath);
-  reg.add({"indsfile", "Indicies file to read (internal use only)"}, &inputs.indFilePath);
-  reg.add({"outputstlfile", "Where to save resulting STL file"}, &inputs.outputStlFilePath);
-  reg.add({"outputquatfile", "Where to save resulting quaternion"}, &inputs.outputQuatFilePath);
+  // Config
   reg.add({"config", "Location of folder with configurations"}, &config);
 
-  std::string algoString = "Algorithm to run {";
-  for(const auto& type : stringToAlgoType)
-  {
-    algoString += "\n" + type.first + "\n" + ",";
-  }
-  algoString[algoString.length() - 1] = '}';
-  reg.add({"algorithm", algoString}, &inputs.algo);
+  // Algorithm to run
+  reg.add({"algorithm", algoString}, &inputs.algorithm);
+  reg.add({"raytraced", "True: uses ray tracing for calculations, False: uses rasterization."}, &inputs.raytraced, true);
+
+  // Inputs
+  reg.add({"inputStl", "STL file to optimize (required)"}, &inputs.inputStl);
+
+  // Outputs
+  reg.add({"outputStl", "Where to save resulting STL file"}, &inputs.outputStl);
+  reg.add({"outputQuat", "Where to save resulting quaternion"}, &inputs.outputQuat);
+
+  // Headless requires algorithm to run
+  reg.add({"headless", "Run in headless mode. Always closes on done. Requires algorithm to be specified"}, &inputs.headless, true);
+  reg.add({"closeOnDone", "True: closes when algorithm is done. Overriden by headless"}, &inputs.closeOnDone, true);
+
+  // Internal
+  reg.add({"vertsFile", "Verts file to read (used by Cura plugin)"}, &inputs.vertsFile);
+  reg.add({"indsFile", "Indicies file to read (used by Cura plugin)"}, &inputs.indsFile);
+
   cli.add(reg);
   cli.parse(argc, argv);
+
+  if(inputs.headless)
+  {
+    // Force close when headless
+    inputs.closeOnDone = true;
+    // Check that algorithm is selected
+    if(inputs.algorithm == "")
+    {
+      std::cout << "Error: algorithm not speficied in headless mode\n";
+      return handleExit(EXIT_FAILURE);
+    }
+
+    appInfo.headless           = inputs.headless;
+    appInfo.headlessFrameCount = std::numeric_limits<uint32_t>::max();
+  }
 
   // Config
   AppConfig::instance().setBasePath(config != "" ? std::filesystem::path(config) :
@@ -1733,28 +1798,40 @@ int main(int argc, char** argv)
   nvapp::Application application;
   application.init(appInfo);
 
-  // Algorithms
-  auto algoSync = std::make_unique<AlgorithmSync>();
-  //algoSync.get()->startAlgorithm();
+  int                              error_code = EXIT_SUCCESS;
+  std::shared_ptr<GCodeOptimizer2> g_code_optimizer2;
+  try
+  {
+    // Algorithms
+    auto algoSync = std::make_unique<AlgorithmSync>();
 
-  // Elements added to the application
-  auto g_code_optimizer2 = std::make_shared<GCodeOptimizer2>(inputs);  // Our tutorial element
-  auto windowTitle = std::make_shared<nvapp::ElementDefaultWindowTitle>();  // Element displaying the window title with application name and size
-  auto windowMenu   = std::make_shared<nvapp::ElementDefaultMenu>();  // Element displaying a menu, File->Exit ...
-  auto customCamera = std::make_shared<nvapp::CustomCamera>();
-  g_code_optimizer2->m_camera = customCamera;
-  g_code_optimizer2->m_algo   = std::move(algoSync);
-  g_code_optimizer2->hasRtx   = vkContext.hasExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+    // Elements added to the application
+    g_code_optimizer2 = std::make_shared<GCodeOptimizer2>(inputs);  // Our tutorial element
+    auto windowTitle = std::make_shared<nvapp::ElementDefaultWindowTitle>();  // Element displaying the window title with application name and size
+    auto windowMenu   = std::make_shared<nvapp::ElementDefaultMenu>();  // Element displaying a menu, File->Exit ...
+    auto customCamera = std::make_shared<nvapp::CustomCamera>();
+    g_code_optimizer2->m_camera         = customCamera;
+    g_code_optimizer2->m_algo           = std::move(algoSync);
+    g_code_optimizer2->hasRtx           = vkContext.hasExtensionEnabled(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME);
+    g_code_optimizer2->programStartTime = programStartTime;
 
-  // Adding all elements
-  application.addElement(windowMenu);
-  application.addElement(windowTitle);
-  application.addElement(customCamera);
-  application.addElement(g_code_optimizer2);
+    // Adding all elements
+    application.addElement(windowMenu);
+    application.addElement(windowTitle);
+    application.addElement(customCamera);
+    application.addElement(g_code_optimizer2);
 
-  application.run();     // Start the application, loop until the window is closed
+    application.run();  // Start the application, loop until the window is closed
+  }
+  catch(const std::exception& e)
+  {
+    std::cerr << "Error: " << e.what() << "\n";
+    g_code_optimizer2->errorThrown = true;
+    error_code                     = EXIT_FAILURE;
+  }
+
   application.deinit();  // Closing application
   vkContext.deinit();    // De-initialize the Vulkan context
 
-  return 0;
+  return handleExit(error_code);
 }

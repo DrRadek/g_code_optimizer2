@@ -11,6 +11,8 @@ import tempfile
 import os
 import json
 
+from functools import partial
+
 class GCodeOptimizer2Extension(Extension):
     def __init__(self):
         super().__init__()
@@ -18,50 +20,95 @@ class GCodeOptimizer2Extension(Extension):
 
         # Menu location
         self.setMenuName("g_code_optimizer2")
-        self.addMenuItem("Optimize orientation", self.optimize_orientation)
 
-    def optimize_orientation(self):
+        # Available algorithms exposed as menu items
+        algos = [
+            ("stochastic", "stochastic (faster)"),
+            ("deterministic", "deterministic (slower)"),
+            ("", "UI mode")
+        ]
+
+        # Add the menu items
+        for algo_name, algo_description in algos:
+            self.addMenuItem(f"Optimize orientation -> {algo_description}", partial(self.optimize_orientation, algo_name))
+
+    def optimize_orientation(self, algo_name : str):
+        self.settings = self.get_plugin_settings()
+
         # Read config
-        self.optimizer_exe_path = self.get_plugin_settings()["g_code_optimizer2_exe_path"]
+        self.optimizer_exe_path = self.settings["g_code_optimizer2_exe_path"]
+        self.algo_name = algo_name
 
         # Get selected objects
         selection = Selection.getAllSelectedObjects()
 
-        # TODO: potential performance improvement: optimize for all at once
+        processes = []
+        # Start processes
         for node in selection:
+            # Temporary files to communicate with C++
+            # TODO: potential performance improvement: use shared memory instead
+            v_fd, v_path = tempfile.mkstemp(suffix=".verts.bin")
+            i_fd, i_path = tempfile.mkstemp(suffix=".inds.bin")
+            q_fd, q_path = tempfile.mkstemp(suffix=".rotated.quat")
+
+            os.close(v_fd)
+            os.close(i_fd)
+            os.close(q_fd)
+
             # Optimize each of selected object separately
-            self.run_process_for_node(node)
+            proc = self.start_process_for_node(node, v_path, i_path, q_path)
+            processes.append((proc, node, v_path, i_path, q_path))
 
-    def run_process_for_node(self, node: SceneNode):
-        # Temporary files to communicate with C++
-        # TODO: potential performance improvement: use shared memory instead
-        v_fd, v_path = tempfile.mkstemp(suffix=".verts.bin")
-        i_fd, i_path = tempfile.mkstemp(suffix=".inds.bin")
-        q_fd, q_path = tempfile.mkstemp(suffix=".rotated.quat")
+        # Wait for processes to finish
+        for proc, node, v_path, i_path, q_path in processes:
+            # finish
+            self.finish_process_for_node(proc, node, q_path)
 
-        os.close(v_fd)
-        os.close(i_fd)
-        os.close(q_fd)
+            # cleanup
+            os.remove(v_path)
+            os.remove(i_path)
+            os.remove(q_path)
+
+    def start_process_for_node(self, node: SceneNode, v_path :str, i_path : str, q_path : str):
+        proc = None
 
         try:
             # Build arguments for C++ optimizer
             indices_were_saved = self.write_mesh_arrays(node, v_path, i_path)
 
-            # TODO: change to your actual exe path
             input_array = [self.optimizer_exe_path]
-            input_array.append('--vertsfile')
+            input_array.append('--vertsFile')
             input_array.append(v_path)
 
             if indices_were_saved:
-                input_array.append('--indsfile')
+                input_array.append('--indsFile')
                 input_array.append(i_path)
 
-            input_array.append('--outputquatfile')
+            input_array.append('--outputQuat')
             input_array.append(q_path)
+
+            if self.algo_name != "":
+                # Not UI
+                input_array.append("--headless")
+                input_array.append("--algorithm")
+                input_array.append(self.algo_name)
+
+            Logger.log("d", f"Inputs: {input_array}")
 
             # Call the C++ optimizer and wait
             proc = subprocess.Popen(input_array)
-            proc.wait()
+        finally:
+            return proc
+
+    def finish_process_for_node(self, proc: subprocess.Popen, node: SceneNode, q_path : str):
+        try:
+            if proc == None:
+                return
+
+            # Wait for the process
+            if proc.wait() != 0:
+                Logger.logException("d", f"g_code_optimizer2 failed")
+                return
 
             # Apply the optimized orientation
             with open(q_path, "r") as f:
@@ -72,10 +119,8 @@ class GCodeOptimizer2Extension(Extension):
                 w = float(quat_data[3])
                 quat : Quaternion = Quaternion(x, z, y, w) # Remapping, C++ uses different up axis
                 node.setOrientation(quat, transform_space=SceneNode.TransformSpace.World)
-
         finally:
-            os.remove(v_path)
-            os.remove(i_path)
+            return
 
     # Returns: True if indices were written, False otherwise
     def write_mesh_arrays(self, node : SceneNode, verts_path : str, inds_path: str):

@@ -31,11 +31,11 @@ class StochasticAlgorithm : public Algorithm
   // Algo parameters
   struct Config
   {
-    int N                      = 10000;  // Maximum N points to generate
-    int K                      = 100;    // end when no improvement after K points
-    int NGlobal                = 20;     // Maximum NGlobal shots
-    int KGlobal                = 5;      // end when no improvement after KGlobal shots
-    float differenceFromBestFrac = 0;    // how much can generated point differ
+    int   N                      = 10000;  // Maximum N points to generate
+    int   K                      = 100;    // end when no improvement after K points
+    int   NGlobal                = 20;     // Maximum NGlobal shots
+    int   KGlobal                = 5;      // end when no improvement after KGlobal shots
+    float differenceFromBestFrac = 0;      // how much can generated point differ
 
     // Parameters for local optimization of N points
     float KPointsDeltaStart = 0.1f;
@@ -62,7 +62,7 @@ class StochasticAlgorithm : public Algorithm
     {
       timeSinceLastBest = 0;
       bestVolume        = std::numeric_limits<float>::max();
-      std::cout << "Generate and optimize N random candidates...\n";
+      // std::cout << "Generate and optimize N random candidates...\n";
       for(int i = 0; i < config.N; ++i)
       {
         // Generate random normalized point
@@ -96,8 +96,8 @@ class StochasticAlgorithm : public Algorithm
         }
       }
 
-      //// Set position to the point
-      std::cout << "Optimizing best candidate...\n";
+      // Set position to the point
+      // std::cout << "Optimizing best candidate...\n";
       co_await requestVolumeForQuat(bestRotation, true);
       currentVolume   = bestVolume;
       currentRotation = bestRotation;
