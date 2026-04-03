@@ -1,5 +1,8 @@
 #include "custom_camera.hpp"
 #include <iostream>
+
+#include <nvgui/window.hpp>
+
 namespace nvapp {
 
 CustomCamera::CustomCamera()
@@ -9,12 +12,10 @@ CustomCamera::CustomCamera()
 
 void CustomCamera::onUIRender()
 {
-
+  if(!interactiveCameraEnabled || !nvgui::isWindowHovered(ImGui::FindWindowByName("Viewport")))
+    return;
 
   nvutils::CameraManipulator::Inputs inputs;  // Mouse and keyboard inputs
-
-  if(!interactiveCameraEnabled)
-    return;
 
   float wheelScrollAmount = ImGui::GetIO().MouseWheel;
   if(wheelScrollAmount != 0.0f)
