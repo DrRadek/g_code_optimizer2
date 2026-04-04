@@ -86,8 +86,9 @@
 // Python
 #include "python_volume_forwarder.hpp"
 
-// Json
+// Json, app config
 #include "include/json_helpers.hpp"
+#include "include/app_config.hpp"
 
 static const std::vector<std::pair<std::string, AlgorithmType>> stringToAlgoType{{"test", AlgorithmType::Test},
                                                                                  {"basic", AlgorithmType::UniformPoints},
@@ -262,6 +263,8 @@ public:
         throw std::runtime_error("unknown algorithm (" + inputs.algorithm + ")");
       }
     }
+
+    programInitTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - programStartTime);
   }
 
   //-------------------------------------------------------------------------------
@@ -1247,7 +1250,6 @@ public:
       std::cout << "starting algorithm...\n";
       // Request to start the algorithm
       algoStartTime   = std::chrono::steady_clock::now();
-      programInitTime = std::chrono::duration_cast<std::chrono::milliseconds>(algoStartTime - programStartTime);
       response        = m_algo->startAlgorithm(selectedAlgo);
       m_camera->disableInteractive();
       startAlgorithm = false;
@@ -1266,10 +1268,10 @@ public:
   {
     if(m_algo->isAlgorithmRunning())
     {
-      std::cout << "Program init took " << programInitTime << " ms\n";
+      std::cout << "Program init took " << programInitTime << "\n";
       std::cout << "Algorithm finished in: "
                 << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - algoStartTime)
-                << " ms\n";
+                << "\n";
     }
 
     m_algo->stopAlgorithm();

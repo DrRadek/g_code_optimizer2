@@ -1,21 +1,5 @@
 #pragma once
-#include "AlgorithmSync.hpp"
-#include <atomic>
-#include <condition_variable>
-#include <functional>
-#include <memory>
-#include <mutex>
-#include <optional>
-#include <thread>
-
-#include <glm/gtx/quaternion.hpp>
-
 #include "Algorithm.hpp"
-
-#include <coroutine>
-#include <iostream>
-#include <cassert>
-#include <variant>
 
 template <class... Ts>
 struct overloaded : Ts...
@@ -41,53 +25,15 @@ public:
   AlgorithmSync() = default;
   ~AlgorithmSync() { stopAlgorithm(); }
 
-  AlgoRequestAny startAlgorithm(AlgorithmType algoType)
-  {
-    stopAlgorithm();
-    task = startAlgorithmTask(algoType, algorithm);
+  AlgoRequestAny startAlgorithm(AlgorithmType algoType);
 
-    auto& h = task->h;
-    auto& p = h.promise();
-
-    h.resume();
-    algorithmRunning = true;
-    iterationCount   = 0;
-
-    return p.algo_request.value();
-  }
-
-  void stopAlgorithm()
-  {
-    if(!isAlgorithmRunning())
-      return;
-
-    task.reset();
-    algorithm.reset();
-    algorithmRunning = false;
-
-    std::cout << "Total algorithm iterations: " << iterationCount << "\n";
-  }
+  void stopAlgorithm();
 
   bool       isAlgorithmRunning() { return algorithmRunning; }
   bool       isAlgorithmDone() { return task->h.done(); }
   AlgoResult getAlgorithmResult() { return task->h.promise().algo_result; }
 
-  AlgoRequestAny runAlgorithm(RendererResult result)
-  {
-    ++iterationCount;
-
-    auto& h = task->h;
-    auto& p = h.promise();
-
-    p.renderer_result = result;
-    p.algo_request.reset();
-    p.active.resume();
-
-    if(isAlgorithmDone())
-      return AlgoRequestAny{};
-
-    return p.algo_request.value();
-  }
+  AlgoRequestAny runAlgorithm(RendererResult result);
 
 private:
   bool                       algorithmRunning = false;

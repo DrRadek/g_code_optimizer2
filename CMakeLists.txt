@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22...3.31)
-project(vk_raytracing_tutorial VERSION 2.0 LANGUAGES C CXX)
+project(g_code_optimizer2 VERSION 1.0 LANGUAGES C CXX)
 
 # Here we can set the Slang version to use (uncomment to override the default)
 # set(Slang_VERSION "2025.20" CACHE STRING "Version of Slang to use")

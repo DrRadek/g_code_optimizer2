@@ -1,11 +1,8 @@
 #pragma once
 #include "Algorithm.hpp"
 
-#include <glm/gtc/constants.hpp>
-#include "FibonacciPoints.hpp"
-
 #include "include/json_helpers.hpp"
-#include <nlohmann/json.hpp>
+#include "include/app_config.hpp"
 
 class UniformPointsAlgorithm : public Algorithm
 {
@@ -16,23 +13,8 @@ class UniformPointsAlgorithm : public Algorithm
   };
   const Config config;
 
-  AlgoTask algorithmLogic() override
-  {
-    co_await generateFibonacciPoints(*this, config.N, [this](glm::vec3 point) {
-      if(currentVolume < bestVolume)
-      {
-        bestVolume   = currentVolume;
-        bestRotation = currentRotation;
-      }
-    });
-
-    std::cout << "Best volume is:" << bestVolume << "\n";
-
-    // Finish
-    co_return AlgoResult(bestVolume, bestRotation);
-  };
-
 public:
+  AlgoTask algorithmLogic() override;
   UniformPointsAlgorithm()
       : Algorithm()
       , config(getJsonConfig<Config>(AppConfig::instance().getAlgorithmsPath() / "basic.json"))
