@@ -55,6 +55,11 @@ AlgoTask StochasticAlgorithm::algorithmLogic()
           continue;
         }
       }
+      else
+      {
+        // Skip random search of more points
+        break;
+      }
 
       ++timeSinceLastBest;
       if(timeSinceLastBest > config.K)

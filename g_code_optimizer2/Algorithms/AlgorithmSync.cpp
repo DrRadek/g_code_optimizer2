@@ -33,16 +33,18 @@ AlgoTask startAlgorithmTask(AlgorithmType algoType, std::unique_ptr<Algorithm>& 
   return algoOwner->run();
 }
 
-AlgoRequestAny AlgorithmSync::startAlgorithm(AlgorithmType algoType)
+AlgoRequestAny AlgorithmSync::startAlgorithm(AlgorithmType algoType, unsigned int maxEvals)
 {
   stopAlgorithm();
-  task = startAlgorithmTask(algoType, algorithm);
+  this->maxEvals = maxEvals;
+  task           = startAlgorithmTask(algoType, algorithm);
 
   auto& h = task->h;
   auto& p = h.promise();
 
   h.resume();
   algorithmRunning = true;
+  forceDone        = false;
   iterationCount   = 0;
 
   return p.algo_request.value();
@@ -62,6 +64,12 @@ void AlgorithmSync::stopAlgorithm()
 
 AlgoRequestAny AlgorithmSync::runAlgorithm(RendererResult result)
 {
+  if(maxEvals > 0 && iterationCount >= maxEvals)
+  {
+    forceDone = true;
+    return AlgoRequestAny{};
+  }
+
   ++iterationCount;
 
   auto& h = task->h;

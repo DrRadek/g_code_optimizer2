@@ -1,15 +1,20 @@
 {
   "algorithm": "",
   "raytraced": false,
-
-  "inputStl": "",
-
-  "outputStl": "",
-  "outputQuat": "",
-
   "headless": false,
   "closeOnDone": false,
 
+  "textureResolution": 0,
+  "voxelSpacing" : 0.1,
+
+  "inputStl": "",
+  "outputStl": "",
+
+  "runs" : 1,
+  "maxEvals": 0,
+  "outputStats": "",
+
+  "outputQuat": "",
   "vertsFile": "",
   "indsFile": ""
 }

@@ -33,6 +33,7 @@ public:
   void setRotation(glm::quat rotation) { this->rotation = rotation; }
 
   glm::quat convertPositionToQuat(glm::vec3 position);
+  glm::vec3 getPosition();
   glm::quat getQuatNoRoll(glm::quat quat);
   glm::quat getRotation() { return rotation; }
 

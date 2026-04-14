@@ -90,11 +90,16 @@
 #include "include/json_helpers.hpp"
 #include "include/app_config.hpp"
 
-static const std::vector<std::pair<std::string, AlgorithmType>> stringToAlgoType{{"test", AlgorithmType::Test},
-                                                                                 {"basic", AlgorithmType::UniformPoints},
-                                                                                 {"deterministic", AlgorithmType::Deterministic},
-                                                                                 {"stochastic", AlgorithmType::Stochastic},
-                                                                                 {"python", AlgorithmType::Python}};
+static const std::map<std::string, AlgorithmType> stringToAlgoType{{"test", AlgorithmType::Test},
+                                                                   {"basic", AlgorithmType::UniformPoints},
+                                                                   {"deterministic", AlgorithmType::Deterministic},
+                                                                   {"stochastic", AlgorithmType::Stochastic},
+                                                                   {"python", AlgorithmType::Python}};
+static const std::map<AlgorithmType, std::string> algoTypeToString{{AlgorithmType::Test, "test"},
+                                                                   {AlgorithmType::UniformPoints, "basic"},
+                                                                   {AlgorithmType::Deterministic, "deterministic"},
+                                                                   {AlgorithmType::Stochastic, "stochastic"},
+                                                                   {AlgorithmType::Python, "python"}};
 
 //---------------------------------------------------------------------------------------
 class GCodeOptimizer2 : public nvapp::IAppElement
@@ -109,21 +114,39 @@ class GCodeOptimizer2 : public nvapp::IAppElement
 public:
   struct Inputs
   {
-    std::string algorithm = "";
-    bool        raytraced = false;
+    std::string algorithm   = "";
+    bool        raytraced   = false;
+    bool        headless    = false;
+    bool        closeOnDone = false;
 
-    std::string inputStl = "";
+    // Voxel spacing is used over texture resolution
+    unsigned int textureResolution = 0;
+    float        voxelSpacing      = 0;
 
-    std::string outputStl  = "";
+    std::string inputStl  = "";
+    std::string outputStl = "";
+
+    // Statistics
+    unsigned int runs        = 1;
+    unsigned int maxEvals    = 0;
+    std::string  outputStats = "";
+
+    // Used by Cura Voxelizer
     std::string outputQuat = "";
-
-    bool headless    = false;
-    bool closeOnDone = false;
-
-    std::string vertsFile = "";
-    std::string indsFile  = "";
+    std::string vertsFile  = "";
+    std::string indsFile   = "";
   } inputs;
 
+  struct AlgoStats
+  {
+    std::string algo_name       = "";
+    std::string model_name      = "";
+    int         init_time_ms    = 0;
+    int         algo_time_ms    = 0;
+    int         algo_iterations = 0;
+    float       result          = 0;
+    glm::vec3   position{};
+  } algoStats;
 
   GCodeOptimizer2(Inputs inputs)
       : inputs(inputs) {};
@@ -134,6 +157,19 @@ public:
   // - Called when the application initialize
   void onAttach(nvapp::Application* app) override
   {
+    if(inputs.textureResolution != 0)
+    {
+      // Set fixed texture resolution size
+      setCurrentResolution({inputs.textureResolution, inputs.textureResolution});
+    }
+
+    if(inputs.voxelSpacing != 0)
+    {
+      // Use dynamic texture resolution while respecting voxel spacing
+      useFixedAreaResolution = true;
+      areaResolution         = inputs.voxelSpacing;
+    }
+
     m_app = app;
 
     // Initialize the VMA allocator
@@ -250,18 +286,21 @@ public:
     {
       startAlgorithm = true;
 
-      for(const auto& [name, enumType] : stringToAlgoType)
+      auto it = stringToAlgoType.find(inputs.algorithm);
+      if(it != stringToAlgoType.end())
       {
-        if(name == inputs.algorithm)
-        {
-          selectedAlgo = enumType;
-        }
+        selectedAlgo = it->second;
       }
-
-      if(selectedAlgo == AlgorithmType::None)
+      else
       {
         throw std::runtime_error("unknown algorithm (" + inputs.algorithm + ")");
       }
+    }
+
+    if(inputs.outputStats != "")
+    {
+      // Save algo name
+      algoStats.model_name = std::filesystem::path(inputs.inputStl).filename().string();
     }
 
     programInitTime = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - programStartTime);
@@ -1226,6 +1265,7 @@ public:
       {
         minVolume    = volume;
         bestRotation = viewInvMatrix;
+        bestPosition = lastPosition;
       }
     }
     else
@@ -1247,10 +1287,13 @@ public:
     }
     else if(startAlgorithm)
     {
+      // Reset best
+      minVolume = std::numeric_limits<float>().max();
+
       std::cout << "starting algorithm...\n";
       // Request to start the algorithm
-      algoStartTime   = std::chrono::steady_clock::now();
-      response        = m_algo->startAlgorithm(selectedAlgo);
+      algoStartTime = std::chrono::steady_clock::now();
+      response      = m_algo->startAlgorithm(selectedAlgo, inputs.maxEvals);
       m_camera->disableInteractive();
       startAlgorithm = false;
     }
@@ -1269,18 +1312,58 @@ public:
     if(m_algo->isAlgorithmRunning())
     {
       std::cout << "Program init took " << programInitTime << "\n";
-      std::cout << "Algorithm finished in: "
-                << std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - algoStartTime)
-                << "\n";
+      auto algo_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - algoStartTime);
+      std::cout << "Algorithm finished in: " << algo_time << "\n";
+
+      if(m_algo->isAlgorithmDone())
+      {
+        if(inputs.outputStats != "")
+        {
+          auto it = algoTypeToString.find(selectedAlgo);
+          if(it != algoTypeToString.end())
+          {
+            algoStats.algo_name = it->second;
+          }
+          else
+          {
+            std::cerr << "Saving stats as unknown algorithm (this should never happen)";
+            algoStats.algo_name = "unknown";
+          }
+
+          // Note: model_name already saved
+          algoStats.algo_iterations = m_algo->getIterations();
+          algoStats.algo_time_ms    = algo_time.count();
+          algoStats.init_time_ms    = programInitTime.count();
+          algoStats.result          = minVolume;
+          algoStats.position        = bestPosition;
+          append_record(inputs.outputStats, algoStats);
+        }
+        if(++current_run < inputs.runs)
+        {
+          // Start the algorithm again
+          startAlgorithm = true;
+        }
+      }
+      else
+      {
+        std::cout << "Algorithm forced to end before finishing\n";
+      }
     }
 
     m_algo->stopAlgorithm();
 
-    selectedAlgo = {};
-    if(inputs.closeOnDone)
+    if(!startAlgorithm)
     {
-      this->m_app->close();
-      return false;
+      // Don't switch to no algorithm before finishing all runs
+      selectedAlgo = {};
+      // Reset the counter
+      current_run = 0;
+
+      if(inputs.closeOnDone)
+      {
+        this->m_app->close();
+        return false;
+      }
     }
 
     m_camera->enableInteractive();
@@ -1346,6 +1429,7 @@ public:
     // std::cout << m_camera->getRoll() << "\n";
     viewInvMatrix = glm::inverse(viewMatrix);
     lastRotation  = m_camera->getRotation();
+    lastPosition  = m_camera->getPosition();
   }
 
   void ForwardToPython()
@@ -1545,9 +1629,12 @@ public:
   std::chrono::steady_clock::time_point programStartTime;
 
 private:
+  // Run
+  unsigned int current_run = 0;
+
   // Time
   std::chrono::steady_clock::time_point algoStartTime;
-  std::chrono::milliseconds             programInitTime;
+  std::chrono::milliseconds             programInitTime{};
 
   // Python
   std::unique_ptr<PythonVolumeForwarder> pythonVolumeForwarder;
@@ -1557,6 +1644,7 @@ private:
   float                                  pythonForwarderPointSize = 5;
   bool                                   pythonForwarderClear     = false;
   glm::quat                              lastRotation{};  // Camera rotation used in last frame
+  glm::vec3                              lastPosition{};  // Camera position used in last frame
 
   // Should start algorithm
   bool startAlgorithm = false;
@@ -1569,10 +1657,10 @@ private:
   AlgoRequestAny   algoRequest;
 
   // Other
-  bool  useFixedAreaResolution = true;  // fixed width x height
-  float areaResolution         = 0.1f;  // used to calculate width x height
-  float maxSupportHeight       = 0;     // maximum support height (used to display relative colors)
-  float minCellSize            = 0;     // maximum area resolution (used to limit areaResolution)
+  bool  useFixedAreaResolution = false;  // fixed width x height
+  float areaResolution         = 0.1f;   // used to calculate width x height
+  float maxSupportHeight       = 0;      // maximum support height (used to display relative colors)
+  float minCellSize            = 0;      // maximum area resolution (used to limit areaResolution)
 
   // Volume integration
   nvshaders::VolumeIntegrateCompute m_volumeIntegrateCompute{};
@@ -1584,6 +1672,7 @@ private:
   float                       maxVolume = 0;
   float                       minVolume = std::numeric_limits<float>().max();
   shaderio::float4x4          bestRotation{};  // Used to save the result
+  glm::vec3                   bestPosition{};  // Used for stats
   //shaderio::float4x4          bestMatrixFromAlgo;
   //float                       minVolumeFromAlgo = std::numeric_limits<float>().max();
 
@@ -1689,20 +1778,31 @@ int main(int argc, char** argv)
 
   // Algorithm to run
   reg.add({"algorithm", algoString}, &inputs.algorithm);
-  reg.add({"raytraced", "True: uses ray tracing for calculations, False: uses rasterization."}, &inputs.raytraced, true);
+  reg.add({"raytraced", "uses ray tracing for calculations (slower)."}, &inputs.raytraced, true);
+
+  // Headless requires algorithm to run
+  reg.add({"headless", "Run in headless mode. Always closes on done. Requires algorithm to be specified"}, &inputs.headless, true);
+  reg.add({"closeOnDone", "True: closes when algorithm is done. Overriden by headless"}, &inputs.closeOnDone, true);
+
+  // Resolution
+  reg.add({"textureResolution", "Texture resolution (higher = more precise, slower, max: 4096). Incompatible with voxelSpacing."},
+          &inputs.textureResolution);
+  reg.add({"voxelSpacing", "Uses dynamic texture resolution while keeping same distance between voxels (lower = more precise, slower). Incompatible with textureResolution."},
+          &inputs.voxelSpacing);
 
   // Inputs
   reg.add({"inputStl", "STL file to optimize (required)"}, &inputs.inputStl);
 
   // Outputs
   reg.add({"outputStl", "Where to save resulting STL file"}, &inputs.outputStl);
-  reg.add({"outputQuat", "Where to save resulting quaternion"}, &inputs.outputQuat);
 
-  // Headless requires algorithm to run
-  reg.add({"headless", "Run in headless mode. Always closes on done. Requires algorithm to be specified"}, &inputs.headless, true);
-  reg.add({"closeOnDone", "True: closes when algorithm is done. Overriden by headless"}, &inputs.closeOnDone, true);
+  // Stats
+  reg.add({"runs", "Number of runs (default 1, used for statistics)"}, &inputs.runs);
+  reg.add({"maxEvals", "Maximum number of evaluations (force stop after maxEvals is exceeded)"}, &inputs.maxEvals);
+  reg.add({"outputStats", "Where to save/append statistics"}, &inputs.outputStats);
 
   // Internal
+  reg.add({"outputQuat", "Where to save resulting quaternion"}, &inputs.outputQuat);
   reg.add({"vertsFile", "Verts file to read (used by Cura plugin)"}, &inputs.vertsFile);
   reg.add({"indsFile", "Indicies file to read (used by Cura plugin)"}, &inputs.indsFile);
 
@@ -1729,7 +1829,7 @@ int main(int argc, char** argv)
     // Check that algorithm is selected
     if(inputs.algorithm == "")
     {
-      std::cout << "Error: algorithm not speficied in headless mode\n";
+      std::cerr << "Error: algorithm not speficied in headless mode\n";
       return handleExit(EXIT_FAILURE);
     }
 
@@ -1737,6 +1837,22 @@ int main(int argc, char** argv)
     appInfo.headlessFrameCount = std::numeric_limits<uint32_t>::max();
   }
 
+  if((inputs.textureResolution == 0 && inputs.voxelSpacing == 0) || inputs.textureResolution != 0 && inputs.voxelSpacing != 0)
+  {
+    std::cerr << "Error: Exactly one of textureResolution and voxelSpacing must be specified.\n\ttextureResolution = "
+              << inputs.textureResolution << "\n\tvoxelSpacing = " << inputs.voxelSpacing << "\n";
+    return handleExit(EXIT_FAILURE);
+  }
+  if(inputs.textureResolution < 0)
+  {
+    std::cerr << "Error: textureResolution can't be negative\n";
+    return handleExit(EXIT_FAILURE);
+  }
+  if(inputs.voxelSpacing < 0)
+  {
+    std::cerr << "Error: voxelSpacing can't be negative\n";
+    return handleExit(EXIT_FAILURE);
+  }
 
   // Setting up the Vulkan context, instance and device extensions
   VkPhysicalDeviceShaderObjectFeaturesEXT shaderObjectFeatures{.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_OBJECT_FEATURES_EXT};
@@ -1850,4 +1966,23 @@ int main(int argc, char** argv)
   return handleExit(error_code);
 }
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(GCodeOptimizer2::Inputs, algorithm, raytraced, inputStl, outputStl, outputQuat, headless, closeOnDone, vertsFile, indsFile)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(GCodeOptimizer2::Inputs,
+                                   algorithm,
+                                   raytraced,
+                                   headless,
+                                   closeOnDone,
+                                   textureResolution,
+                                   voxelSpacing,
+                                   inputStl,
+                                   outputStl,
+                                   runs,
+                                   maxEvals,
+                                   outputStats,
+                                   outputQuat,
+                                   vertsFile,
+                                   indsFile)
+
+namespace glm {
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(vec3, x, y, z)
+}  // namespace glm
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(GCodeOptimizer2::AlgoStats, algo_name, model_name, init_time_ms, algo_time_ms, algo_iterations, result, position)

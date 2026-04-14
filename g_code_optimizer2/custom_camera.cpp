@@ -47,6 +47,10 @@ void CustomCamera::onUIRender()
 
 void CustomCamera::move(glm::vec2 direction)
 {
+  // Skip if no move
+  if(direction.x == 0 && direction.y == 0)
+    return;
+
   glm::vec3 local_right = rotation * glm::vec3(1.0f, 0.0f, 0.0f);
   glm::vec3 local_up    = rotation * glm::vec3(0.0f, 1.0f, 0.0f);
   rotation = glm::normalize(glm::angleAxis(-direction.x, local_up) * glm::angleAxis(-direction.y, local_right) * rotation);
@@ -69,6 +73,11 @@ glm::quat CustomCamera::convertPositionToQuat(glm::vec3 position)
   glm::vec3 forward = -pos;
 
   return glm::rotation(defaultForward, forward);
+}
+
+glm::vec3 CustomCamera::getPosition()
+{
+  return rotation * -defaultForward;
 }
 
 glm::quat CustomCamera::getQuatNoRoll(glm::quat quat)
@@ -94,7 +103,7 @@ float CustomCamera::getRoll()
   glm::quat diff       = rotation * glm::conjugate(quatNoRoll);
   float     angle      = glm::angle(diff);
 
-  if(dot(glm::axis(diff), {0, 0, 1}) > 0)
+  if(dot(glm::axis(diff), -defaultForward) > 0)
   {
     return -angle;
   }

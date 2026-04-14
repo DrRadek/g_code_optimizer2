@@ -51,9 +51,12 @@ void PythonVolumeForwarder::RunStep(glm::quat quat, float normalized_volume, boo
     }
   }
 
+  // Note:
+  //  It would be better to use camera object here.
+  //  Possibility of breaking when forward vector changes.
   last_quat           = quat;
   glm::vec3 cam_front = quat * glm::vec3(0.0f, 0.0f, 1.0f);
-  glm::vec3 cam_up = quat * glm::vec3(1.0f, 0.0f, 0.0f);
+  glm::vec3 cam_up    = quat * glm::vec3(1.0f, 0.0f, 0.0f);
 
   // Wait for buffer to have free space
   uint32_t waited = 0;
