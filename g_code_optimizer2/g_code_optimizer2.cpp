@@ -121,7 +121,7 @@ public:
 
     // Voxel spacing is used over texture resolution
     unsigned int textureResolution = 0;
-    float        voxelSpacing      = 0;
+    float        voxelSpacing      = 0.0f;
 
     std::string inputStl  = "";
     std::string outputStl = "";
@@ -160,7 +160,14 @@ public:
     if(inputs.textureResolution != 0)
     {
       // Set fixed texture resolution size
-      setCurrentResolution({inputs.textureResolution, inputs.textureResolution});
+      VkExtent2D resolution = {inputs.textureResolution, inputs.textureResolution};
+      setCurrentResolution(resolution);
+      if(inputs.headless)
+      {
+        // limit resolution in headless
+        setMaxResolution(resolution);
+        m_maxRenderResolution = resolution;
+      }
     }
 
     if(inputs.voxelSpacing != 0)
@@ -187,12 +194,6 @@ public:
     // The VMA allocator is used for all allocations, the staging uploader will use it for staging buffers and images
     m_stagingUploader.init(&m_allocator, true);
 
-    // Setting up the Slang compiler for hot reload shader
-    m_slangCompiler.addSearchPaths(nvsamples::getShaderDirs());
-    m_slangCompiler.defaultTarget();
-    m_slangCompiler.defaultOptions();
-    m_slangCompiler.addOption({slang::CompilerOptionName::DebugInformation,
-                               {slang::CompilerOptionValueKind::Int, SLANG_DEBUG_INFO_LEVEL_MAXIMAL}});
 #if defined(AFTERMATH_AVAILABLE)
     // This aftermath callback is used to report the shader hash (Spirv) to the Aftermath library.
     m_slangCompiler.setCompileCallback([&](const std::filesystem::path& sourceFile, const uint32_t* spirvCode, size_t spirvSize) {
@@ -271,7 +272,7 @@ public:
       std::cout << "max support height: " << maxSupportHeight << "\n";
       std::cout << "min cell size: " << minCellSize << "\n";
 
-      if(areaResolution < minCellSize)
+      if(useFixedAreaResolution && areaResolution < minCellSize)
       {
         std::string error =
             "Error: cell size is too small to fit in texture. Min cell size is " + std::to_string(minCellSize) + "\n";
@@ -687,31 +688,6 @@ public:
   //--------------------------------------------------------------------------------------------------
   void updateTextures() {}
 
-  // This function is used to compile the Slang shader, and when it fails, it will use the pre-compiled shaders
-  VkShaderModuleCreateInfo compileSlangShader(const std::filesystem::path& filename, const std::span<const uint32_t>& spirv)
-  {
-    SCOPED_TIMER(__FUNCTION__);
-
-    // Use pre-compiled shaders by default
-    VkShaderModuleCreateInfo shaderCode = nvsamples::getShaderModuleCreateInfo(spirv);
-
-    // Try compiling the shader
-    std::filesystem::path shaderSource = nvutils::findFile(filename, nvsamples::getShaderDirs());
-    if(m_slangCompiler.compileFile(shaderSource))
-    {
-      // Using the Slang compiler to compile the shaders
-      shaderCode.codeSize = m_slangCompiler.getSpirvSize();
-      shaderCode.pCode    = m_slangCompiler.getSpirv();
-    }
-    else
-    {
-      LOGE("Error compiling shaders: %s\n%s\n", shaderSource.string().c_str(),
-           m_slangCompiler.getLastDiagnosticMessage().c_str());
-    }
-    return shaderCode;
-  }
-
-
   //---------------------------------------------------------------------------------------------------------------
   // Compile the graphics shaders and create the shader modules.
   // This function only creates vertex and fragment shader modules for the graphics pipeline.
@@ -721,8 +697,9 @@ public:
   {
     SCOPED_TIMER(__FUNCTION__);
 
-    // Use pre-compiled shaders by default
-    VkShaderModuleCreateInfo shaderCode = compileSlangShader("volume_calculation_raster.slang", volume_calculation_raster_slang);
+    // Use pre-compiled shaders
+    VkShaderModuleCreateInfo shaderCode = nvsamples::getShaderModuleCreateInfo(volume_calculation_raster_slang);
+    //auto slang = std::span(volume_calculation_raster_slang);
 
     // Destroy the previous shaders if they exist
     vkDestroyShaderEXT(m_app->getDevice(), m_vertexShader, nullptr);
@@ -750,8 +727,10 @@ public:
     shaderInfo.stage     = VK_SHADER_STAGE_VERTEX_BIT;
     shaderInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
     shaderInfo.pName     = "vertexMain";  // The entry point of the vertex shader
-    shaderInfo.codeSize  = shaderCode.codeSize;
-    shaderInfo.pCode     = shaderCode.pCode;
+
+    shaderInfo.codeSize = shaderCode.codeSize;  // All shaders are in the same spirv
+    shaderInfo.pCode    = shaderCode.pCode;
+
     vkCreateShadersEXT(m_app->getDevice(), 1U, &shaderInfo, nullptr, &m_vertexShader);
     NVVK_DBG_NAME(m_vertexShader);
 
@@ -759,8 +738,10 @@ public:
     shaderInfo.stage     = VK_SHADER_STAGE_FRAGMENT_BIT;
     shaderInfo.nextStage = 0;
     shaderInfo.pName     = "fragmentMain";  // The entry point of the vertex shader
-    shaderInfo.codeSize  = shaderCode.codeSize;
-    shaderInfo.pCode     = shaderCode.pCode;
+
+    // code already set above
+    //shaderInfo.codeSize  = shaderCode.codeSize;
+    //shaderInfo.pCode     = shaderCode.pCode;
     vkCreateShadersEXT(m_app->getDevice(), 1U, &shaderInfo, nullptr, &m_fragmentShader);
     NVVK_DBG_NAME(m_fragmentShader);
   }
@@ -1074,8 +1055,8 @@ public:
     for(auto& s : stages)
       s.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
 
-    // Compile shader, fallback to pre-compiled
-    VkShaderModuleCreateInfo shaderCode = compileSlangShader("volume_calculation_rtx.slang", volume_calculation_rtx_slang);
+    // pre-compiled shader
+    VkShaderModuleCreateInfo shaderCode = nvsamples::getShaderModuleCreateInfo(volume_calculation_rtx_slang);
 
     stages[eRaygen].pNext     = &shaderCode;
     stages[eRaygen].pName     = "rgenMain";
@@ -1699,12 +1680,11 @@ private:
 
 
   // Application and core components
-  nvapp::Application*     m_app{};             // The application framework
-  nvvk::ResourceAllocator m_allocator{};       // Resource allocator for Vulkan resources, used for buffers and images
-  nvvk::StagingUploader  m_stagingUploader{};  // Utility to upload data to the GPU, used for staging buffers and images
-  nvvk::SamplerPool      m_samplerPool{};      // Texture sampler pool, used to acquire texture samplers for images
-  nvvk::GBuffer          m_gBuffers{};         // The G-Buffer
-  nvslang::SlangCompiler m_slangCompiler{};    // The Slang compiler used to compile the shaders
+  nvapp::Application*     m_app{};            // The application framework
+  nvvk::ResourceAllocator m_allocator{};      // Resource allocator for Vulkan resources, used for buffers and images
+  nvvk::StagingUploader m_stagingUploader{};  // Utility to upload data to the GPU, used for staging buffers and images
+  nvvk::SamplerPool     m_samplerPool{};      // Texture sampler pool, used to acquire texture samplers for images
+  nvvk::GBuffer         m_gBuffers{};         // The G-Buffer
 
   // Pipeline
   nvvk::GraphicsPipelineState m_dynamicPipeline;  // The dynamic pipeline state used to set the graphics pipeline state, like viewport, scissor, and depth test
@@ -1788,7 +1768,7 @@ int main(int argc, char** argv)
   reg.add({"textureResolution", "Texture resolution (higher = more precise, slower, max: 4096). Incompatible with voxelSpacing."},
           &inputs.textureResolution);
   reg.add({"voxelSpacing", "Uses dynamic texture resolution while keeping same distance between voxels (lower = more precise, slower). Incompatible with textureResolution."},
-          &inputs.voxelSpacing);
+          &inputs.voxelSpacing, 0);
 
   // Inputs
   reg.add({"inputStl", "STL file to optimize (required)"}, &inputs.inputStl);
@@ -1862,13 +1842,15 @@ int main(int argc, char** argv)
   VkPhysicalDeviceRayTracingPipelineFeaturesKHR rtPipelineFeature{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
 
   nvvk::ContextInitInfo vkSetup{
+#ifndef NDEBUG
       .instanceExtensions = {VK_EXT_DEBUG_UTILS_EXTENSION_NAME},
+#endif
       .deviceExtensions =
           {
               {VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME},
               {VK_EXT_SHADER_OBJECT_EXTENSION_NAME, &shaderObjectFeatures},
           },
-      .postSelectPhysicalDeviceCallback = [](VkInstance instance, VkPhysicalDevice phys, nvvk::ContextInitInfo& ci) -> bool {
+      .postSelectPhysicalDeviceCallback = [&inputs](VkInstance instance, VkPhysicalDevice phys, nvvk::ContextInitInfo& ci) -> bool {
         std::vector<VkExtensionProperties> extProps;
         nvvk::Context::getDeviceExtensions(phys, extProps);
         auto hasExt = [&](const char* name) {
@@ -1877,7 +1859,7 @@ int main(int argc, char** argv)
         };
 
         if(hasExt(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME) && hasExt(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME)
-           && hasExt(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME))
+           && hasExt(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME) && (!inputs.headless || inputs.raytraced))
         {
           static VkPhysicalDeviceAccelerationStructureFeaturesKHR accel{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR};
           static VkPhysicalDeviceRayTracingPipelineFeaturesKHR rt{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR};
@@ -1894,9 +1876,11 @@ int main(int argc, char** argv)
   }
 
   // Adding control on the validation layers
+#ifndef NDEBUG
   nvvk::ValidationSettings validationSettings;
   validationSettings.setPreset(nvvk::ValidationSettings::LayerPresets::eStandard);
   vkSetup.instanceCreateInfoExt = validationSettings.buildPNextChain();
+#endif
 
 #if defined(USE_NSIGHT_AFTERMATH)
   // Adding the Aftermath extension to the device and initialize the Aftermath

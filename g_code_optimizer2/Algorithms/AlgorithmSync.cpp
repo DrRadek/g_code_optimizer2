@@ -70,8 +70,6 @@ AlgoRequestAny AlgorithmSync::runAlgorithm(RendererResult result)
     return AlgoRequestAny{};
   }
 
-  ++iterationCount;
-
   auto& h = task->h;
   auto& p = h.promise();
 
@@ -82,5 +80,8 @@ AlgoRequestAny AlgorithmSync::runAlgorithm(RendererResult result)
   if(isAlgorithmDone())
     return AlgoRequestAny{};
 
-  return p.algo_request.value();
+  auto& request = p.algo_request.value();
+  std::visit([this](AlgoRequestBase& r) { iterationCount += !r.skipCalculation; }, request);
+
+  return request;
 }
