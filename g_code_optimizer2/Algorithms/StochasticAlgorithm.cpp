@@ -58,7 +58,7 @@ AlgoTask StochasticAlgorithm::algorithmLogic()
       else
       {
         // Skip random search of more points
-        break;
+        //break;
       }
 
       ++timeSinceLastBest;

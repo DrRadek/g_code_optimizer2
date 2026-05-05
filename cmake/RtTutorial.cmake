@@ -59,6 +59,23 @@ function(setup_rt_tutorial_sample)
     )
     FetchContent_MakeAvailable(nlohmann_json)
 
+    # Compiler options
+    if (MSVC)
+        target_compile_options(g_code_optimizer2 PRIVATE
+            #/O2
+            /arch:AVX2
+            /openmp:llvm
+            /openmp:experimental
+        )
+        #target_compile_options(g_code_optimizer2 PRIVATE /FA)
+    else()
+        target_compile_options(g_code_optimizer2 PRIVATE
+            -O3
+            -mavx2
+            -fopenmp
+        )
+    endif()
+
     # Link libraries and include directories (consistent across all samples)
     target_link_libraries(${PROJECT_NAME} PRIVATE
         nvpro2::nvapp

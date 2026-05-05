@@ -93,7 +93,9 @@ if sys.platform == "win32":
             if not self._sem_req or not self._sem_res:
                 raise RuntimeError("Could not open semaphores. Is the C++ worker running?")
 
-            kernel32.WaitForSingleObject(self._sem_res, 0)  # Ensure the response semaphore is initially empty
+            while kernel32.WaitForSingleObject(self._sem_res, 0) == 0:
+                pass
+            kernel32.WaitForSingleObject(self._sem_res, 0)
             self.request_for_pos(Vec3(0.0, 0.0, 1.0))  # Move to default position
 
         def _synchronize(self) -> float:
@@ -122,6 +124,5 @@ else:  # Linux / macOS
 
 if __name__ == "__main__":
     algo = Algo()
-    while True:
-        algo.request_for_move(Vec2(1.0, 0.0))
-
+    for i in range(4):
+        print(algo.request_for_move(Vec2(1.0, 0.0)))

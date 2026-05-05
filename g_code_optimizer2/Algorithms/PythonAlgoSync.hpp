@@ -21,6 +21,8 @@ class PythonAlgoSync : public Algorithm
   HANDLE      sem_request{};
   HANDLE      sem_response{};
 
+  bool has_timeout = true;
+
 public:
   PythonAlgoSync();
 

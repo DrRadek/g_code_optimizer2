@@ -31,7 +31,8 @@ void CalculateAABB_Pass1(
     // Each thread processes triangles with stride AABB_SHADER_WG_SIZE
     for(uint i = lid + gid * AABB_SHADER_WG_SIZE; i < params.vertCount; i += AABB_SHADER_WG_SIZE * params.groupSize)
     {
-        float3 t = mul(params.projInvMatrix, float4(vertices[i], 0)).xyz;
+        float3 t = mul((float3x3)params.projInvMatrix, vertices[i]);
+        //float3 t = mul(params.projInvMatrix, float4(vertices[i], 0)).xyz;
         localMin = min(localMin, t);
         localMax = max(localMax, t);
     }

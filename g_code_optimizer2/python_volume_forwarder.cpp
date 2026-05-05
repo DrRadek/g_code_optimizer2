@@ -39,15 +39,15 @@ void PythonVolumeForwarder::RunStep(glm::quat quat, float normalized_volume, boo
     {
       SendSettings(point_size, clear);
       // skip small difference
-      std::cout << "skip\n";
+      //std::cout << "skip\n";
       return;
     }
     else
     {
-      printf("dot=%f abs=%f acos=%f angle=%f\n", d, ad, ac, angle2);
-      printf("quat:      %.10f %.10f %.10f %.10f\n", quat.w, quat.x, quat.y, quat.z);
-      printf("last_quat: %.10f %.10f %.10f %.10f\n", last_quat->w, last_quat->x, last_quat->y, last_quat->z);
-      std::cout << "angle is: " << angle << "\n";
+      //printf("dot=%f abs=%f acos=%f angle=%f\n", d, ad, ac, angle2);
+      //printf("quat:      %.10f %.10f %.10f %.10f\n", quat.w, quat.x, quat.y, quat.z);
+      //printf("last_quat: %.10f %.10f %.10f %.10f\n", last_quat->w, last_quat->x, last_quat->y, last_quat->z);
+      //std::cout << "angle is: " << angle << "\n";
     }
   }
 
@@ -65,10 +65,11 @@ void PythonVolumeForwarder::RunStep(glm::quat quat, float normalized_volume, boo
     std::this_thread::sleep_for(std::chrono::microseconds(100));
     ++waited;
   }
-  if(waited > 0)
-    std::cout << "  [waited " << waited << " ticks for Python to consume]\n";
 
-  std::cout << "forwarding: " << normalized_volume << "\n";
+  //if(waited > 0)
+  //  std::cout << "  [waited " << waited << " ticks for Python to consume]\n";
+
+  //std::cout << "forwarding: " << normalized_volume << "\n";
 
   // Forward data
   if(forward_volume)

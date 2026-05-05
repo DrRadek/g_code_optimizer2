@@ -402,6 +402,37 @@ inline std::vector<Vec3> convertToVertices(const Container& triangles)
   return vertices;
 }
 
+/**
+   * @brief Finds unique vertices from a vector of triangles
+   * @param triangles The container of triangles to convert
+   * @return vector of vertices
+   */
+template <typename Container>
+inline std::tuple<std::vector<float>, std::vector<float>, std::vector<float>> convertToXYZArrays(const Container& triangles)
+{
+  const auto&        inverseMap  = findInverseMap(triangles);
+  auto               verticesNum = inverseMap.size();
+  std::vector<float> verticesX{};
+  std::vector<float> verticesY{};
+  std::vector<float> verticesZ{};
+
+  verticesX.reserve(verticesNum);
+  verticesY.reserve(verticesNum);
+  verticesZ.reserve(verticesNum);
+
+  size_t vertexIdx{0};
+  for(const auto& item : inverseMap)
+  {
+    const glm::vec3& vec = item.first;
+    verticesX.emplace_back(vec.x);
+    verticesY.emplace_back(vec.y);
+    verticesZ.emplace_back(vec.z);
+
+    ++vertexIdx;
+  }
+  return {verticesX, verticesY, verticesZ};
+}
+
 inline Vec3 operator-(const Vec3& rhs, const Vec3& lhs)
 {
   return {rhs.x - lhs.x, rhs.y - lhs.y, rhs.z - lhs.z};

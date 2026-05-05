@@ -12,17 +12,16 @@
 
 #include <iostream>
 
-VkResult nvshaders::AABBCompute::init(VkCommandBuffer               cmd,
-                                      nvvk::ResourceAllocator*      alloc,
-                                      std::span<const uint32_t>     spirv,
-                                      std::vector<shaderio::float3> vertices)
+#include "_autogen/aabb_compute.slang.h"
+
+VkResult nvshaders::AABBCompute::init(VkCommandBuffer cmd, nvvk::ResourceAllocator* alloc, std::vector<shaderio::float3>& vertices)
 {
-  const auto         vertCount = vertices.size();
+  const auto vertCount = vertices.size();
   std::cout << "[AABB] amount of vertices is: " << vertCount << "\n";
 
-  const unsigned ITEMS_PER_THREAD = 4;
+  const unsigned     ITEMS_PER_THREAD = 4;
   const unsigned int vertsPerGroup    = shaderio::AABB_SHADER_WG_SIZE_CPU * ITEMS_PER_THREAD;
-  const unsigned int groupSize = std::max(int(std::ceil(float(vertCount) / float(vertsPerGroup))),1);
+  const unsigned int groupSize        = std::max(int(std::ceil(float(vertCount) / float(vertsPerGroup))), 1);
 
   assert(!m_device);
   m_alloc  = alloc;
@@ -70,8 +69,9 @@ VkResult nvshaders::AABBCompute::init(VkCommandBuffer               cmd,
   compInfo.stage.pNext                   = &shaderInfo;
   compInfo.layout                        = m_pipelineLayout;
 
-  shaderInfo.codeSize = uint32_t(spirv.size_bytes());  // All shaders are in the same spirv
-  shaderInfo.pCode    = spirv.data();
+  // All shaders are in the same spirv
+  shaderInfo.codeSize = aabb_compute_slang_sizeInBytes;
+  shaderInfo.pCode    = aabb_compute_slang;
 
   // AABB pipeline pass 1
   compInfo.stage.pName = "CalculateAABB_Pass1";
@@ -118,6 +118,8 @@ void nvshaders::AABBCompute::deinit()
   if(!m_device)
     return;
 
+  writeSetContainer.clear();
+
   m_alloc->destroyBuffer(m_vertBuffer);
   m_alloc->destroyBuffer(m_aabbBuffer_partial);
   m_alloc->destroyBuffer(m_aabbBuffer_final);
@@ -158,7 +160,7 @@ void nvshaders::AABBCompute::runCompute(VkCommandBuffer cmd, const shaderio::flo
 }
 
 
-shaderio::AABB nvshaders::AABBCompute::readResult(nvvk::ResourceAllocator* alloc)
+shaderio::AABB nvshaders::AABBCompute::readResult()
 {
   shaderio::AABB* aabbPtr = reinterpret_cast<shaderio::AABB*>(m_aabbBuffer_final.mapping);
   return aabbPtr[0];

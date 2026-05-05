@@ -18,12 +18,12 @@ public:
   AABBCompute() {};
   ~AABBCompute() { assert(m_device == VK_NULL_HANDLE); }  //  "Missing to call deinit"
 
-  VkResult init(VkCommandBuffer cmd, nvvk::ResourceAllocator* alloc, std::span<const uint32_t> spirv, std::vector<shaderio::float3> vertices);
-  void cleanupAfterInit(nvvk::ResourceAllocator* alloc);
-  void deinit();
+  VkResult init(VkCommandBuffer cmd, nvvk::ResourceAllocator* alloc, std::vector<shaderio::float3>& vertices);
+  void     cleanupAfterInit(nvvk::ResourceAllocator* alloc);
+  void     deinit();
 
   void           runCompute(VkCommandBuffer cmd, const shaderio::float4x4 projInvMatrix);
-  shaderio::AABB readResult(nvvk::ResourceAllocator* alloc);
+  shaderio::AABB readResult();
 
 private:
   nvvk::ResourceAllocator* m_alloc{};

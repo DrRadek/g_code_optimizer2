@@ -338,7 +338,7 @@ public:
     m_gBuffers.deinit();
     m_stagingUploader.deinit();
 
-    if(m_useGpuForAABB)
+    if (m_useGpuForAABB)
       m_aabbCompute.deinit();
 
     m_volumeIntegrateCompute.deinit();
@@ -1197,8 +1197,8 @@ public:
 
     if(m_useGpuForAABB)
     {
-      VkCommandBuffer cmd    = m_app->createTempCmdBuffer();
-      auto            matrix = viewInvMatrix;
+      VkCommandBuffer cmd = m_app->createTempCmdBuffer();
+      auto matrix = viewInvMatrix;
       m_aabbCompute.runCompute(cmd, matrix);
       m_app->submitAndWaitTempCmdBuffer(cmd);
 
@@ -1210,7 +1210,7 @@ public:
     {
       auto matrix = ((glm::mat3x3)viewInvMatrix);
 
-      // TODO: CPU version
+       // TODO: CPU version
       const size_t n = aabbVerticesX.size();
 
       const float* vx_data = aabbVerticesX.data();
@@ -1625,7 +1625,7 @@ public:
     }
     else
     {
-      auto [X, Y, Z]     = nvsamples::exportXYZFromStlTriangles(triangles);
+      auto [X, Y, Z] = nvsamples::exportXYZFromStlTriangles(triangles);
       int n              = X.size();
       int padding        = 8 - n % 8;
       int aligned_8_size = n + padding;
@@ -1635,15 +1635,15 @@ public:
       Z.resize(aligned_8_size);
 
       for(int i = n; i < aligned_8_size; ++i)
-      {
+      { 
         X[i] = X[i - 1];
         Y[i] = Y[i - 1];
         Z[i] = Z[i - 1];
       }
 
-      aabbVerticesX = std::move(X);
-      aabbVerticesY = std::move(Y);
-      aabbVerticesZ = std::move(Z);
+      aabbVerticesX  = std::move(X);
+      aabbVerticesY  = std::move(Y);
+      aabbVerticesZ  = std::move(Z);
     }
 
     if(benchmark_aabb)
@@ -1856,8 +1856,8 @@ private:
   VkPhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
 
   // Ray tracing toggle
-  bool               m_useRayTracing = false;  // Set to true to use ray tracing, false for rasterization
-  bool               m_useGpuForAABB = false;  // Set to true to use GPU for bounding box calculations, CPU if false
+  bool m_useRayTracing = false;  // Set to true to use ray tracing, false for rasterization
+  bool m_useGpuForAABB = false;  // Set to true to use GPU for bounding box calculations, CPU if false
   std::vector<float> aabbVerticesX{};
   std::vector<float> aabbVerticesY{};
   std::vector<float> aabbVerticesZ{};
