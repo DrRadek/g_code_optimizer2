@@ -59,7 +59,7 @@ AABB_Benchmark::Result AABB_Benchmark::process_chunk(size_t start, size_t end)
     // _mm_movehl_ps(m,m)... temp[0..3] = [m[2],m[3],m[2],m[3]] ... moves high half to low half
     // m[0..1] = [min(m[0],temp[0]), min(m[1],temp[1])] = [min(m[0],m[2]), min(m[1],m[3])]
     m = _mm_min_ps(m, _mm_movehl_ps(m, m));
-    //m         = _mm_min_ps(m, _mm_shuffle_ps(m, m, 0x55));
+    //m         = _mm_min_ps(m, _mm_permute_ps(m, _MM_SHUFFLE(1, 1, 1, 1)));
 
     // _MM_SHUFFLE(1, 1, 1, 1) => temp[0..3] = m[1,1,1,1]
     // m = min(m[0..3],temp[0..3]) = min(m[0..3],m[1,1,1,1])
@@ -242,7 +242,7 @@ void AABB_Benchmark::Start()
       // _mm_movehl_ps(m,m)... temp[0..3] = [m[2],m[3],m[2],m[3]] ... moves high half to low half
       // m[0..1] = [min(m[0],temp[0]), min(m[1],temp[1])] = [min(m[0],m[2]), min(m[1],m[3])]
       m = _mm_min_ps(m, _mm_movehl_ps(m, m));
-      //m         = _mm_min_ps(m, _mm_shuffle_ps(m, m, 0x55));
+      //m         = _mm_min_ps(m, _mm_permute_ps(m, _MM_SHUFFLE(1, 1, 1, 1)));
 
       // _MM_SHUFFLE(1, 1, 1, 1) => temp[0..3] = m[1,1,1,1]
       // m = min(m[0..3],temp[0..3]) = min(m[0..3],m[1,1,1,1])
@@ -370,7 +370,7 @@ void AABB_Benchmark::Start()
           __m128 hi = _mm256_extractf128_ps(v, 1);
           __m128 m  = _mm_min_ps(lo, hi);
           m         = _mm_min_ps(m, _mm_movehl_ps(m, m));
-          m         = _mm_min_ps(m, _mm_shuffle_ps(m, m, 0x55));
+          m         = _mm_min_ps(m, _mm_permute_ps(m, _MM_SHUFFLE(1, 1, 1, 1)));
           return _mm_cvtss_f32(m);
         };
 
@@ -379,7 +379,7 @@ void AABB_Benchmark::Start()
           __m128 hi = _mm256_extractf128_ps(v, 1);
           __m128 m  = _mm_max_ps(lo, hi);
           m         = _mm_max_ps(m, _mm_movehl_ps(m, m));
-          m         = _mm_max_ps(m, _mm_shuffle_ps(m, m, 0x55));
+          m         = _mm_max_ps(m, _mm_permute_ps(m, _MM_SHUFFLE(1, 1, 1, 1)));
           return _mm_cvtss_f32(m);
         };
 
