@@ -18,6 +18,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <nlohmann/json.hpp>
+
 class AABB_Benchmark
 {
 private:
@@ -27,11 +29,23 @@ private:
     glm::vec3 max;
   } result{};
 
+  struct Stats
+  {
+    std::string name          = "";
+    int         n             = 0;
+    int         m             = 0;
+    double      avg_ms        = 0;
+    double      median_ms     = 0;
+    double      total_time_ms = 0;
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(Stats, name, n, m, avg_ms, median_ms, total_time_ms)
+  };
+  std::vector<Stats> stats{};
+
+  AABB_Benchmark::Result process_chunk(size_t start, size_t end);
 
 public:
-  AABB_Benchmark(nvapp::Application& m_app, nvvk::ResourceAllocator& alloc, nvshaders::AABBCompute& aabbCompute)
-      : aabbCompute(aabbCompute)
-      , alloc(alloc)
+  AABB_Benchmark(nvapp::Application& m_app, nvvk::ResourceAllocator& alloc)
+      : alloc(alloc)
       , m_app(m_app)
   {
     device = m_app.getDevice();
@@ -42,17 +56,6 @@ public:
   void Start();
 
 private:
-  // Tests
-  Result GPU()
-  {
-    auto cmd = m_app.createTempCmdBuffer();
-    aabbCompute.runCompute(cmd, projInvMatrix);
-    m_app.submitAndWaitTempCmdBuffer(cmd);
-
-    auto result = aabbCompute.readResult();
-    return {result.min, result.max};
-  }
-
   // Register a test: name, function, and its arguments
   void AddTest(std::string name, std::function<Result()> fn) { tests_.push_back({std::move(name), std::move(fn)}); }
 
@@ -70,16 +73,15 @@ private:
   std::vector<Test> tests_;
 
   // Helpers for shader preparations
-  nvshaders::AABBCompute&  aabbCompute;
+  nvshaders::AABBCompute   aabbCompute{};
   nvvk::ResourceAllocator& alloc;
   nvapp::Application&      m_app;
   VkDevice                 device;
 
-  // Temporary
+  // Vulkan
   VkCommandBuffer   cmd{};
   VkFenceCreateInfo fenceInfo{};
   VkFence           fence{};
-
 
   // Data to test on
   int                    n = 0;

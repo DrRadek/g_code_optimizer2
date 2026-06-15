@@ -19,7 +19,7 @@ public:
   ~AABBCompute() { assert(m_device == VK_NULL_HANDLE); }  //  "Missing to call deinit"
 
   VkResult init(VkCommandBuffer cmd, nvvk::ResourceAllocator* alloc, std::vector<shaderio::float3>& vertices);
-  void     cleanupAfterInit(nvvk::ResourceAllocator* alloc);
+  void     cleanupAfterInit();
   void     deinit();
 
   void           runCompute(VkCommandBuffer cmd, const shaderio::float4x4 projInvMatrix);

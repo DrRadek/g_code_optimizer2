@@ -19,7 +19,7 @@ VkResult nvshaders::AABBCompute::init(VkCommandBuffer cmd, nvvk::ResourceAllocat
   const auto vertCount = vertices.size();
   std::cout << "[AABB] amount of vertices is: " << vertCount << "\n";
 
-  const unsigned     ITEMS_PER_THREAD = 4;
+  const unsigned int ITEMS_PER_THREAD = 4;
   const unsigned int vertsPerGroup    = shaderio::AABB_SHADER_WG_SIZE_CPU * ITEMS_PER_THREAD;
   const unsigned int groupSize        = std::max(int(std::ceil(float(vertCount) / float(vertsPerGroup))), 1);
 
@@ -33,8 +33,7 @@ VkResult nvshaders::AABBCompute::init(VkCommandBuffer cmd, nvvk::ResourceAllocat
   alloc->createBuffer(m_aabbBuffer_partial, sizeof(shaderio::AABB) * groupSize, VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT,
                       VMA_MEMORY_USAGE_AUTO);
   NVVK_DBG_NAME(m_aabbBuffer_partial.buffer);
-  alloc->createBuffer(m_aabbBuffer_final, sizeof(shaderio::AABB),
-                      VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU,
+  alloc->createBuffer(m_aabbBuffer_final, sizeof(shaderio::AABB), VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO,
                       VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
   NVVK_DBG_NAME(m_aabbBuffer_final.buffer);
 
@@ -98,7 +97,6 @@ VkResult nvshaders::AABBCompute::init(VkCommandBuffer cmd, nvvk::ResourceAllocat
   aabb_params_data.vertCount = (shaderio::uint)vertCount;
   aabb_params_data.groupSize = groupSize;
 
-
   // Create WriteSetContainer
   //nvvk::WriteSetContainer writeSetContainer;
   writeSetContainer.append(m_descriptorPack.makeWrite(shaderio::aabb_Binding::Vertices), m_vertBuffer);
@@ -108,7 +106,7 @@ VkResult nvshaders::AABBCompute::init(VkCommandBuffer cmd, nvvk::ResourceAllocat
   return VK_SUCCESS;
 }
 
-void nvshaders::AABBCompute::cleanupAfterInit(nvvk::ResourceAllocator* alloc)
+void nvshaders::AABBCompute::cleanupAfterInit()
 {
   m_alloc->destroyBuffer(stagingBuffer);
 }
@@ -135,7 +133,6 @@ void nvshaders::AABBCompute::deinit()
   m_device            = VK_NULL_HANDLE;
 }
 
-#include <iostream>
 void nvshaders::AABBCompute::runCompute(VkCommandBuffer cmd, const shaderio::float4x4 projInvMatrix)
 {
   // Push constant
@@ -152,16 +149,23 @@ void nvshaders::AABBCompute::runCompute(VkCommandBuffer cmd, const shaderio::flo
   vkCmdDispatch(cmd, aabb_params_data.groupSize, 1, 1);
 
   // Barrier
-  nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT);
+  nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                         VK_ACCESS_2_SHADER_WRITE_BIT, VK_ACCESS_2_SHADER_READ_BIT);
 
   // Run pass 2 - final reduction on one WG
   vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_aabbPipelinePass2);
   vkCmdDispatch(cmd, 1, 1, 1);
-}
 
+  // Barrier
+  nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
+                         VK_ACCESS_2_SHADER_WRITE_BIT, VK_ACCESS_2_HOST_READ_BIT);
+}
 
 shaderio::AABB nvshaders::AABBCompute::readResult()
 {
+  // Invalidate in case of non-coherent memory
+  m_alloc->invalidateBuffer(m_aabbBuffer_final);
+
   shaderio::AABB* aabbPtr = reinterpret_cast<shaderio::AABB*>(m_aabbBuffer_final.mapping);
   return aabbPtr[0];
 }

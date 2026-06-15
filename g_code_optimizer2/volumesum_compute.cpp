@@ -15,8 +15,15 @@ VkResult nvshaders::VolumeSumCompute::init(nvvk::ResourceAllocator* alloc, std::
   m_alloc  = alloc;
   m_device = alloc->getDevice();
 
-  alloc->createBuffer(stagingBuffer, sizeof(float), VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT,
-                      VMA_MEMORY_USAGE_GPU_TO_CPU, VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  alloc->createBuffer(stagingBuffer, sizeof(float), VK_BUFFER_USAGE_2_TRANSFER_DST_BIT, VMA_MEMORY_USAGE_AUTO,
+                      VMA_MEMORY_USAGE_AUTO_PREFER_HOST
+                          | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |  VMA_ALLOCATION_CREATE_MAPPED_BIT);  // VMA_MEMORY_USAGE_AUTO_PREFER_HOST | 
+  //alloc->createBuffer(stagingBuffer, sizeof(float), VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT,
+  //                    VMA_MEMORY_USAGE_GPU_TO_CPU, VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+
+  //alloc->createBuffer(m_aabbBuffer_final, sizeof(shaderio::AABB), VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT,
+  //                    VMA_MEMORY_USAGE_AUTO,  // Was there: VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU
+  //                    VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
   NVVK_DBG_NAME(stagingBuffer.buffer);
 
   // Shader descriptor set layout
@@ -111,20 +118,30 @@ void nvshaders::VolumeSumCompute::runCompute(VkCommandBuffer cmd, int elementCou
     partialCount = groupCount;
   }
   resultBuffer = finalBuffer;
+
+  // Copy
+  recordCopyResultToStaging(cmd);
 }
 
 void nvshaders::VolumeSumCompute::recordCopyResultToStaging(VkCommandBuffer cmd)
 {
-  nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+  //nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT);
+  nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT);  // VK_PIPELINE_STAGE_TRANSFER_BIT
 
   VkBufferCopy copyRegion{0, 0, sizeof(float)};
   vkCmdCopyBuffer(cmd, resultBuffer->buffer, stagingBuffer.buffer, 1, &copyRegion);
 
-  nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT);
+  //nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_HOST_BIT);
+  nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
+    VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_ACCESS_2_HOST_READ_BIT);  // , VK_ACCESS_2_SHADER_WRITE_BIT, VK_ACCESS_2_HOST_READ_BIT
 }
 
 float nvshaders::VolumeSumCompute::readResult()
 {
+  // Invalidate in case of non-coherent memory
+  m_alloc->autoInvalidateBuffer(stagingBuffer);
+  //vkDeviceWaitIdle(m_device);
+
   return reinterpret_cast<float*>(stagingBuffer.mapping)[0];
 }
 

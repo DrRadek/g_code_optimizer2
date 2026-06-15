@@ -1,6 +1,9 @@
 // Enable the use of Nsight Aftermath for crash tracking and shader debugging
 // #define USE_NSIGHT_AFTERMATH  // (not always on, as it slows down the application)
 
+// Slow flag for benchmark before and after
+#define USE_SLOW_AABB
+#undef USE_SLOW_AABB
 
 #define TINYGLTF_IMPLEMENTATION         // Implementation of the GLTF loader library
 #define STB_IMAGE_IMPLEMENTATION        // Implementation of the image loading library
@@ -91,6 +94,9 @@
 #include "include/json_helpers.hpp"
 #include "include/app_config.hpp"
 
+// OpenMP
+#include <omp.h>
+
 static const std::map<std::string, AlgorithmType> stringToAlgoType{{"test", AlgorithmType::Test},
                                                                    {"basic", AlgorithmType::UniformPoints},
                                                                    {"deterministic", AlgorithmType::Deterministic},
@@ -159,6 +165,8 @@ public:
   // - Called when the application initialize
   void onAttach(nvapp::Application* app) override
   {
+
+
     if(inputs.textureResolution != 0)
     {
       // Set fixed texture resolution size
@@ -195,6 +203,13 @@ public:
 
     // The VMA allocator is used for all allocations, the staging uploader will use it for staging buffers and images
     m_stagingUploader.init(&m_allocator, true);
+
+    constexpr bool benchmark_aabb = false;
+    if(benchmark_aabb)
+    {
+      AABB_Benchmark(*m_app, m_allocator).Start();
+      throw std::runtime_error("Benchmark finished.");
+    }
 
     // Acquiring the texture sampler which will be used for displaying the GBuffer
     m_samplerPool.init(app->getDevice());
@@ -253,7 +268,7 @@ public:
     }
 
     if(m_useGpuForAABB)
-      m_aabbCompute.cleanupAfterInit(&m_allocator);
+      m_aabbCompute.cleanupAfterInit();
 
     m_volumeIntegrateCompute.init(&m_allocator, volume_integrate_slang);
     m_volumeSumCompute.init(&m_allocator, volumesum_compute_slang);
@@ -363,6 +378,9 @@ public:
   // - Called every frame
   void onUIRender() override
   {
+    if(inputs.headless)
+      return;
+
     namespace PE = nvgui::PropertyEditor;
 
     bool isAlgoRunning = m_algo->isAlgorithmRunning();
@@ -508,6 +526,10 @@ public:
 
   void onPreRender() {}
 
+  // TODO: move somewhere else
+  VkSemaphore semaphore{};
+  uint64_t    semaphore_pValues;
+
   //---------------------------------------------------------------------------------------------------------------
   // Rendering the scene
   // The scene is rendered to a GBuffer and the GBuffer is displayed in the ImGui window.
@@ -563,7 +585,8 @@ public:
 
 
     // Barrier to make sure the image is ready for been display
-    nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+    if(!inputs.headless)
+      nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
   }
 
   //---------------------------------------------------------------------------------------------------------------
@@ -571,6 +594,9 @@ public:
   // - Called when the ImGui menu is rendered
   void onUIMenu() override
   {
+    if(inputs.headless)
+      return;
+
     bool reload = false;
     if(ImGui::BeginMenu("Tools"))
     {
@@ -1210,109 +1236,152 @@ public:
     {
       auto matrix = ((glm::mat3x3)viewInvMatrix);
 
-      // TODO: CPU version
+#ifdef USE_SLOW_AABB
+      aabbMin = aabbVertices[0];
+      aabbMax = aabbMin;
+
+      const size_t n = aabbVertices.size();
+      for(size_t i = 1; i < n; ++i)
+      {
+        const auto& multiplied = aabbVertices[i] * matrix;
+
+        aabbMax[0] = std::max(aabbMax[0], multiplied[0]);
+        aabbMin[0] = std::min(aabbMin[0], multiplied[0]);
+        aabbMax[1] = std::max(aabbMax[1], multiplied[1]);
+        aabbMin[1] = std::min(aabbMin[1], multiplied[1]);
+        aabbMax[2] = std::max(aabbMax[2], multiplied[2]);
+        aabbMin[2] = std::min(aabbMin[2], multiplied[2]);
+      }
+#else
+
       const size_t n = aabbVerticesX.size();
 
       const float* vx_data = aabbVerticesX.data();
       const float* vy_data = aabbVerticesY.data();
       const float* vz_data = aabbVerticesZ.data();
 
-      const __m256 r00 = _mm256_set1_ps(matrix[0][0]);
-      const __m256 r01 = _mm256_set1_ps(matrix[0][1]);
-      const __m256 r02 = _mm256_set1_ps(matrix[0][2]);
-
-      const __m256 r10 = _mm256_set1_ps(matrix[1][0]);
-      const __m256 r11 = _mm256_set1_ps(matrix[1][1]);
-      const __m256 r12 = _mm256_set1_ps(matrix[1][2]);
-
-      const __m256 r20 = _mm256_set1_ps(matrix[2][0]);
-      const __m256 r21 = _mm256_set1_ps(matrix[2][1]);
-      const __m256 r22 = _mm256_set1_ps(matrix[2][2]);
-
       float minX, minY, minZ;
       float maxX, maxY, maxZ;
 
-      minX = minY = minZ = FLT_MAX;
-      maxX = maxY = maxZ = -FLT_MAX;
+      minX = minY = minZ = std::numeric_limits<float>::max();
+      maxX = maxY = maxZ = std::numeric_limits<float>::lowest();
 
-#pragma omp parallel num_threads(2)
+#pragma omp parallel num_threads(8)
       {
-        __m256 minXv = _mm256_set1_ps(FLT_MAX);
-        __m256 minYv = _mm256_set1_ps(FLT_MAX);
-        __m256 minZv = _mm256_set1_ps(FLT_MAX);
+        int tid      = omp_get_thread_num();
+        int nthreads = omp_get_num_threads();
 
-        __m256 maxXv = _mm256_set1_ps(-FLT_MAX);
-        __m256 maxYv = _mm256_set1_ps(-FLT_MAX);
-        __m256 maxZv = _mm256_set1_ps(-FLT_MAX);
+        int chunk = ((n + nthreads - 1) / nthreads + 7) & ~7;  // round up to multiple of 8
 
-#pragma omp for schedule(static)
-        for(int i = 0; i < (int)n; i += 8)
-        {
-          __m256 vx = _mm256_load_ps(&vx_data[i]);
-          __m256 vy = _mm256_load_ps(&vy_data[i]);
-          __m256 vz = _mm256_load_ps(&vz_data[i]);
+        int start = tid * chunk;
+        int end   = start + chunk < n ? start + chunk : n;
 
-          __m256 rx = _mm256_fmadd_ps(r02, vz, _mm256_fmadd_ps(r01, vy, _mm256_mul_ps(r00, vx)));
-
-          __m256 ry = _mm256_fmadd_ps(r12, vz, _mm256_fmadd_ps(r11, vy, _mm256_mul_ps(r10, vx)));
-
-          __m256 rz = _mm256_fmadd_ps(r22, vz, _mm256_fmadd_ps(r21, vy, _mm256_mul_ps(r20, vx)));
-
-          minXv = _mm256_min_ps(minXv, rx);
-          maxXv = _mm256_max_ps(maxXv, rx);
-
-          minYv = _mm256_min_ps(minYv, ry);
-          maxYv = _mm256_max_ps(maxYv, ry);
-
-          minZv = _mm256_min_ps(minZv, rz);
-          maxZv = _mm256_max_ps(maxZv, rz);
-        }
-
-        // ---- thread-local reduction to scalars ----
-        auto hmin = [](__m256 v) {
-          __m128 lo = _mm256_castps256_ps128(v);
-          __m128 hi = _mm256_extractf128_ps(v, 1);
-          __m128 m  = _mm_min_ps(lo, hi);
-          m         = _mm_min_ps(m, _mm_movehl_ps(m, m));
-          m         = _mm_min_ps(m, _mm_shuffle_ps(m, m, 0x55));
-          return _mm_cvtss_f32(m);
-        };
-
-        auto hmax = [](__m256 v) {
-          __m128 lo = _mm256_castps256_ps128(v);
-          __m128 hi = _mm256_extractf128_ps(v, 1);
-          __m128 m  = _mm_max_ps(lo, hi);
-          m         = _mm_max_ps(m, _mm_movehl_ps(m, m));
-          m         = _mm_max_ps(m, _mm_shuffle_ps(m, m, 0x55));
-          return _mm_cvtss_f32(m);
-        };
-
-        float localMinX = hmin(minXv);
-        float localMinY = hmin(minYv);
-        float localMinZ = hmin(minZv);
-
-        float localMaxX = hmax(maxXv);
-        float localMaxY = hmax(maxYv);
-        float localMaxZ = hmax(maxZv);
+        glm::vec3 min{};
+        glm::vec3 max{};
+        ProcessAABBChunk(matrix, min, max, start, end);
 
 #pragma omp critical
         {
-          minX = std::min(minX, localMinX);
-          minY = std::min(minY, localMinY);
-          minZ = std::min(minZ, localMinZ);
+          minX = std::min(minX, min.x);
+          minY = std::min(minY, min.y);
+          minZ = std::min(minZ, min.z);
 
-          maxX = std::max(maxX, localMaxX);
-          maxY = std::max(maxY, localMaxY);
-          maxZ = std::max(maxZ, localMaxZ);
+          maxX = std::max(maxX, max.x);
+          maxY = std::max(maxY, max.y);
+          maxZ = std::max(maxZ, max.z);
         }
       }
 
       aabbMin = {minX, minY, minZ};
       aabbMax = {maxX, maxY, maxZ};
+#endif
     }
 
     aabbMax.z += glm::max(aabbMax.z * 0.00001f, 0.001f);  // Add small epsilon
   }
+
+#ifndef USE_SLOW_AABB
+  void ProcessAABBChunk(glm::mat3x3& matrix, glm::vec3& min_result, glm::vec3& max_result, size_t start, size_t end)
+  {
+    __m256 r00 = _mm256_set1_ps(matrix[0][0]);
+    __m256 r01 = _mm256_set1_ps(matrix[0][1]);
+    __m256 r02 = _mm256_set1_ps(matrix[0][2]);
+
+    __m256 r10 = _mm256_set1_ps(matrix[1][0]);
+    __m256 r11 = _mm256_set1_ps(matrix[1][1]);
+    __m256 r12 = _mm256_set1_ps(matrix[1][2]);
+
+    __m256 r20 = _mm256_set1_ps(matrix[2][0]);
+    __m256 r21 = _mm256_set1_ps(matrix[2][1]);
+    __m256 r22 = _mm256_set1_ps(matrix[2][2]);
+
+    // 2) Init min/max values
+    __m256 minXv = _mm256_set1_ps(std::numeric_limits<float>::max());
+    __m256 minYv = _mm256_set1_ps(std::numeric_limits<float>::max());
+    __m256 minZv = _mm256_set1_ps(std::numeric_limits<float>::max());
+    __m256 maxXv = _mm256_set1_ps(std::numeric_limits<float>::lowest());
+    __m256 maxYv = _mm256_set1_ps(std::numeric_limits<float>::lowest());
+    __m256 maxZv = _mm256_set1_ps(std::numeric_limits<float>::lowest());
+
+    // Calculate
+    for(size_t i = start; i < end; i += 8)
+    {
+      // load 8 values from the X,Y,Z vectors
+      __m256 vx = _mm256_load_ps(&aabbVerticesX[i]);
+      __m256 vy = _mm256_load_ps(&aabbVerticesY[i]);
+      __m256 vz = _mm256_load_ps(&aabbVerticesZ[i]);
+
+      // " Fused multiply + add"
+      // r02 * vz + r01 * vy + r00 * vx
+      __m256 rx = _mm256_fmadd_ps(r02, vz, _mm256_fmadd_ps(r01, vy, _mm256_mul_ps(r00, vx)));
+
+      __m256 ry = _mm256_fmadd_ps(r12, vz, _mm256_fmadd_ps(r11, vy, _mm256_mul_ps(r10, vx)));
+
+      __m256 rz = _mm256_fmadd_ps(r22, vz, _mm256_fmadd_ps(r21, vy, _mm256_mul_ps(r20, vx)));
+
+      // store min/max
+      minXv = _mm256_min_ps(minXv, rx);
+      maxXv = _mm256_max_ps(maxXv, rx);
+      minYv = _mm256_min_ps(minYv, ry);
+      maxYv = _mm256_max_ps(maxYv, ry);
+      minZv = _mm256_min_ps(minZv, rz);
+      maxZv = _mm256_max_ps(maxZv, rz);
+    }
+
+    // Horizontal min/max reducers
+    auto hmin = [](__m256 v) {
+      __m128 lo = _mm256_castps256_ps128(v);    // v[0...3]
+      __m128 hi = _mm256_extractf128_ps(v, 1);  // v[4...7]
+      __m128 m  = _mm_min_ps(lo, hi);           // m[0..3] = min(v[0..3],v[4..7])
+
+      // https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_movehl_ps&ig_expand=4591
+      // _mm_movehl_ps(m,m)... temp[0..3] = [m[2],m[3],m[2],m[3]] ... moves high half to low half
+      // m[0..1] = [min(m[0],temp[0]), min(m[1],temp[1])] = [min(m[0],m[2]), min(m[1],m[3])]
+      m = _mm_min_ps(m, _mm_movehl_ps(m, m));
+      //m         = _mm_min_ps(m, _mm_shuffle_ps(m, m, 0x55));
+
+      // _MM_SHUFFLE(1, 1, 1, 1) => temp[0..3] = m[1,1,1,1]
+      // m = min(m[0..3],temp[0..3]) = min(m[0..3],m[1,1,1,1])
+      m = _mm_min_ps(m, _mm_permute_ps(m, _MM_SHUFFLE(1, 1, 1, 1)));
+      // extract first float and return
+      return _mm_cvtss_f32(m);
+    };
+
+    auto hmax = [](__m256 v) {
+      __m128 lo = _mm256_castps256_ps128(v);
+      __m128 hi = _mm256_extractf128_ps(v, 1);
+      __m128 m  = _mm_max_ps(lo, hi);
+      m         = _mm_max_ps(m, _mm_movehl_ps(m, m));
+      //m         = _mm_max_ps(m, _mm_shuffle_ps(m, m, 0x55));
+      m = _mm_max_ps(m, _mm_permute_ps(m, _MM_SHUFFLE(1, 1, 1, 1)));
+
+      return _mm_cvtss_f32(m);
+    };
+
+    min_result = {hmin(minXv), hmin(minYv), hmin(minZv)};
+    max_result = {hmax(maxXv), hmax(maxYv), hmax(maxZv)};
+  }
+#endif
 
   void IntegrateVolume(VkCommandBuffer cmd)
   {
@@ -1338,11 +1407,21 @@ public:
   {
     if(m_volumeSumCompute.IsResultBufferValid())
     {
-      VkCommandBuffer copyCmd = m_app->createTempCmdBuffer();
-      m_volumeSumCompute.recordCopyResultToStaging(copyCmd);
-      m_app->submitAndWaitTempCmdBuffer(copyCmd);
+      //
+      const VkSemaphoreWaitInfo waitInfo = {
+          .sType          = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+          .semaphoreCount = 1,
+          .pSemaphores    = &semaphore,
+          .pValues        = &semaphore_pValues,
+      };
+      vkWaitSemaphores(m_app->getDevice(), &waitInfo, std::numeric_limits<uint64_t>::max());
+
+      //VkCommandBuffer copyCmd = m_app->createTempCmdBuffer();
+      //m_volumeSumCompute.recordCopyResultToStaging(copyCmd);
+      //m_app->submitAndWaitTempCmdBuffer(copyCmd);
 
       volume = m_volumeSumCompute.readResult();
+      //std::cout << " volume is:"  << volume << "\n";
 
       if(minVolume > volume)
       {
@@ -1357,6 +1436,10 @@ public:
       // First frame doesn't have a reference to a buffer yet
       std::cout << "First frame, skipping getting calculation result\n\n";
     }
+
+    auto [sem, sem_pValues] = m_app->getFrameSignalSemaphore();
+    semaphore               = std::move(sem);
+    semaphore_pValues       = std::move(sem_pValues);
   }
 
   bool RunAlgorithm()
@@ -1616,15 +1699,16 @@ public:
     // Import the data
     nvsamples::importStlData(m_sceneResource, triangles, m_stagingUploader);
 
-    bool benchmark_aabb = false;
-
-    if(m_useGpuForAABB || benchmark_aabb)
+    if(m_useGpuForAABB)
     {
       std::vector<glm::vec3> vertices = nvsamples::exportVerticesFromStlTriangles(triangles);
       m_aabbCompute.init(cmd, &m_allocator, vertices);
     }
     else
     {
+#ifdef USE_SLOW_AABB
+      aabbVertices = nvsamples::exportVerticesFromStlTriangles(triangles);
+#else
       auto [X, Y, Z]     = nvsamples::exportXYZFromStlTriangles(triangles);
       int n              = X.size();
       int padding        = 8 - n % 8;
@@ -1644,12 +1728,7 @@ public:
       aabbVerticesX = std::move(X);
       aabbVerticesY = std::move(Y);
       aabbVerticesZ = std::move(Z);
-    }
-
-    if(benchmark_aabb)
-    {
-      AABB_Benchmark(*m_app, m_allocator, m_aabbCompute).Start();
-      throw std::runtime_error("Benchmark finished.");
+#endif
     }
   }
   void SaveResult()
@@ -1856,11 +1935,18 @@ private:
   VkPhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProperties{VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_PROPERTIES_KHR};
 
   // Ray tracing toggle
-  bool               m_useRayTracing = false;  // Set to true to use ray tracing, false for rasterization
-  bool               m_useGpuForAABB = false;  // Set to true to use GPU for bounding box calculations, CPU if false
+  bool m_useRayTracing = false;  // Set to true to use ray tracing, false for rasterization
+  bool m_useGpuForAABB = false;  // Set to true to use GPU for bounding box calculations, CPU if false
+
+#ifdef USE_SLOW_AABB
+  // Slow version
+  std::vector<glm::vec3> aabbVertices{};
+#else
+  // Fast version
   std::vector<float> aabbVerticesX{};
   std::vector<float> aabbVerticesY{};
   std::vector<float> aabbVerticesZ{};
+#endif
 };
 
 
@@ -1869,7 +1955,7 @@ int handleExit(int error_code)
   if(error_code != 0)
   {
     std::cout << "Press any key to exit...\n";
-    std::cin.get();
+    //std::cin.get();
   }
   return error_code;
 }
@@ -1912,7 +1998,7 @@ int main(int argc, char** argv)
   reg.add({"textureResolution", "Texture resolution (higher = more precise, slower, max: 4096). Incompatible with voxelSpacing."},
           &inputs.textureResolution);
   reg.add({"voxelSpacing", "Uses dynamic texture resolution while keeping same distance between voxels (lower = more precise, slower). Incompatible with textureResolution."},
-          &inputs.voxelSpacing, 0);
+          &inputs.voxelSpacing, -1);
 
   // Inputs
   reg.add({"inputStl", "STL file to optimize (required)"}, &inputs.inputStl);
@@ -2046,12 +2132,14 @@ int main(int argc, char** argv)
   }
 
   // Setting up the application
-  appInfo.name           = "Ray Tracing Tutorial";
-  appInfo.instance       = vkContext.getInstance();
-  appInfo.device         = vkContext.getDevice();
-  appInfo.physicalDevice = vkContext.getPhysicalDevice();
-  appInfo.queues         = vkContext.getQueueInfos();
-  appInfo.vSync          = false;
+  appInfo.name                    = "Ray Tracing Tutorial";
+  appInfo.instance                = vkContext.getInstance();
+  appInfo.device                  = vkContext.getDevice();
+  appInfo.physicalDevice          = vkContext.getPhysicalDevice();
+  appInfo.queues                  = vkContext.getQueueInfos();
+  appInfo.vSync                   = false;
+  appInfo.preferredFramesInFlight = 1;
+  appInfo.preferredImageCount     = 1;
 
 
   // Create the application

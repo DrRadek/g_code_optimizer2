@@ -322,32 +322,38 @@ struct Vec3Hash
 {
   std::size_t operator()(const Vec3& vertex) const
   {
-    // Combine hashes of x, y, and z using bitwise XOR
-    return std::hash<float>{}(vertex.x) ^ std::hash<float>{}(vertex.y) ^ std::hash<float>{}(vertex.z);
+    auto combine = [](std::size_t seed, float v) {
+      std::size_t h = std::hash<float>{}(v);
+      return seed ^ (h + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2));
+    };
+    std::size_t seed = 0;
+    seed             = combine(seed, vertex.x);
+    seed             = combine(seed, vertex.y);
+    seed             = combine(seed, vertex.z);
+    return seed;
   }
 };
 
-/**
-   * @brief  Find the inverse map: vertex -> face idx
-   * @param triangles The container of triangles from which to find unique vertices
-   * @return A hash map that maps: for each unique vertex -> a vector of corresponding face indices
-   */
+///**
+//   * @brief  Find the inverse map: vertex -> face idx
+//   * @param triangles The container of triangles from which to find unique vertices
+//   * @return A hash map that maps: for each unique vertex -> a vector of corresponding face indices
+//   */
 template <typename Container>
 inline std::unordered_map<Vec3, std::vector<size_t>, Vec3Hash> findInverseMap(const Container& triangles)
 {
   std::unordered_map<Vec3, std::vector<size_t>, Vec3Hash> map{};
-  size_t                                                  triangleIdx{0};
+  map.reserve(triangles.size());  // avoid repeated rehashes
+
+  size_t triangleIdx{0};
   for(const auto& tri : triangles)
   {
-    for(const auto vertex : {&tri.v0, &tri.v1, &tri.v2})
+    for(const auto* vertex : {&tri.v0, &tri.v1, &tri.v2})
     {
-      auto it = map.find(*vertex);
-      if(it != std::end(map))
-      {
-        it->second.emplace_back(triangleIdx);
-        continue;
-      }
-      map[*vertex] = {triangleIdx};
+      auto [it, inserted] = map.try_emplace(*vertex);
+      if(inserted)
+        it->second.reserve(6);  // typical vertex valence in triangle meshes
+      it->second.emplace_back(triangleIdx);
     }
     ++triangleIdx;
   }
