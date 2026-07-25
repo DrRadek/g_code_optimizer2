@@ -23,8 +23,8 @@ class GCodeOptimizer2Extension(Extension):
 
         # Available algorithms exposed as menu items
         algos = [
-            ("stochastic", "stochastic (faster)"),
-            ("deterministic", "deterministic (slower)"),
+            ("stochastic", "stochastic"),
+            ("deterministic", "deterministic"),
             ("", "UI mode")
         ]
 

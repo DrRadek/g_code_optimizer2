@@ -4,8 +4,8 @@
   "headless": false,
   "closeOnDone": false,
 
-  "textureResolution": 0,
-  "voxelSpacing" : 0.1,
+  "textureResolution": 200,
+  "voxelSpacing" : 0,
 
   "inputStl": "",
   "outputStl": "",

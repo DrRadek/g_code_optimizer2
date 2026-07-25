@@ -97,6 +97,9 @@
 // OpenMP
 #include <omp.h>
 
+// GLFW
+#include <GLFW/glfw3.h>
+
 static const std::map<std::string, AlgorithmType> stringToAlgoType{{"test", AlgorithmType::Test},
                                                                    {"basic", AlgorithmType::UniformPoints},
                                                                    {"deterministic", AlgorithmType::Deterministic},
@@ -373,6 +376,9 @@ public:
     m_allocator.deinit();
   }
 
+  // Workaround to trigger update on max resolution change
+  VkExtent2D lastViewportSize;
+
   //---------------------------------------------------------------------------------------------------------------
   // Rendering all UI elements, this includes the image of the GBuffer, and the camera controls.
   // - Called every frame
@@ -451,6 +457,14 @@ public:
 
         if(maxWidthChanged || maxHeightChanged)
         {
+          // Workaround to trigger resize
+          if(!maxResolutionChanged && !skipMaxResolutionUpdate)
+          {
+            auto handle       = m_app->getWindowHandle();
+            auto viewportSize = ImGui::FindWindowByName("Viewport")->Viewport->Size;
+            glfwSetWindowSize(handle, viewportSize.x, viewportSize.y + 1);
+          }
+
           maxResolutionChanged     = true;
           currentResolutionChanged = true;
         }
@@ -493,7 +507,8 @@ public:
   // - Called when the Window "viewport is resized
   void onResize(VkCommandBuffer cmd, const VkExtent2D& size)
   {
-    // No longer needed, viewport resolution is unrelated to render resolution
+    // Update max resolution when it is safe to do so
+    updateMaxResolution();
   }
 
   void resizeBuffers(VkCommandBuffer cmd, const VkExtent2D& size)
@@ -524,6 +539,8 @@ public:
     NVVK_DBG_NAME(m_outVolumeBufferForReduction.buffer);
   }
 
+  bool skipFrame = false;
+  bool skipMaxResolutionUpdate = true;
   void onPreRender() {}
 
   // TODO: move somewhere else
@@ -538,6 +555,12 @@ public:
   void onRender(VkCommandBuffer cmd)
   {
     NVVK_DBG_SCOPE(cmd);  // <-- Helps to debug in NSight
+
+    if(skipFrame)
+    {
+      skipFrame = false;
+      return;
+    }
 
     // Calculate volume
     GetVolumeCalculationResult();
@@ -1807,14 +1830,31 @@ public:
       m_currentRenderResolution = {(unsigned int)currentResolutionWidth, (unsigned int)currentResolutionHeight};
       currentResolutionChanged  = false;
     }
-    /*if(maxResolutionChanged)
+  }
+
+  void updateMaxResolution() {
+    if(skipMaxResolutionUpdate)
+    {
+      maxResolutionChanged = false;
+      skipMaxResolutionUpdate = false;
+      return;
+    }
+
+    if(maxResolutionChanged)
     {
       m_maxRenderResolution = {(unsigned int)maxResolutionWidth, (unsigned int)maxResolutionHeight};
       maxResolutionChanged  = false;
       auto cmd              = m_app->createTempCmdBuffer();
       resizeBuffers(cmd, m_maxRenderResolution);
       m_app->submitAndWaitTempCmdBuffer(cmd);
-    }*/
+      skipFrame = true;
+      skipMaxResolutionUpdate = true;
+
+      // Workaround: revert resize change and ignore next resize
+      auto handle       = m_app->getWindowHandle();
+      auto viewportSize = ImGui::FindWindowByName("Viewport")->Viewport->Size;
+      glfwSetWindowSize(handle, viewportSize.x, viewportSize.y - 1);
+    }
   }
 
   // Camera
