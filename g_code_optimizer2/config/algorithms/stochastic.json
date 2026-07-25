@@ -1,9 +1,6 @@
 {
   "N": 10000,
   "K": 25,
-  "NGlobal": 1,
-  "KGlobal"                : 1,
-  "differenceFromBestFrac" : 1000,
 
   "KPointsDeltaStart": 0.1,
   "KPointsDeltaEnd"   : 0.003,

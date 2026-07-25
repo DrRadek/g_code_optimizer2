@@ -16,9 +16,6 @@ class StochasticAlgorithm : public Algorithm
   {
     int   N                      = 10000;  // Maximum N points to generate
     int   K                      = 100;    // end when no improvement after K points
-    int   NGlobal                = 20;     // Maximum NGlobal shots
-    int   KGlobal                = 5;      // end when no improvement after KGlobal shots
-    float differenceFromBestFrac = 0;      // how much can generated point differ
 
     // Parameters for local optimization of N points
     float KPointsDeltaStart = 0.1f;
@@ -48,9 +45,6 @@ public:
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(StochasticAlgorithm::Config,
                                    N,
                                    K,
-                                   NGlobal,
-                                   KGlobal,
-                                   differenceFromBestFrac,
                                    KPointsDeltaStart,
                                    KPointsDeltaEnd,
                                    KPointsMaxSteps,

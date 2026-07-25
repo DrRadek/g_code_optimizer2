@@ -22,81 +22,50 @@ glm::vec3 randomDirection()
 
 AlgoTask StochasticAlgorithm::algorithmLogic()
 {
-  glm::quat globalBestRotation{};
-  float     globalBestbestVolume = std::numeric_limits<float>::max();
-
-  for(int iGlobal = 0; iGlobal < config.NGlobal; ++iGlobal)
+  timeSinceLastBest = 0;
+  bestVolume        = std::numeric_limits<float>::max();
+  // std::cout << "Generate and optimize N random candidates...\n";
+  for(int i = 0; i < config.N; ++i)
   {
-    timeSinceLastBest = 0;
-    bestVolume        = std::numeric_limits<float>::max();
-    // std::cout << "Generate and optimize N random candidates...\n";
-    for(int i = 0; i < config.N; ++i)
-    {
-      // Generate random normalized point
-      glm::vec3 point = randomDirection();
-
-      // Set position to the point
-      co_await requestVolumeForPosition(point);
-
-      if(currentVolume < bestVolume * (1 + config.differenceFromBestFrac))
-      {
-        // Run local optimizer
-        HookeJeeves localOptimizer = HookeJeeves(*this, config.KPointsDeltaStart, config.KPointsDeltaEnd, config.KPointsMaxSteps);
-        co_await localOptimizer.optimize();
-
-        float volume = localOptimizer.getBestVolume();
-
-        // Store if better
-        if(volume < bestVolume)
-        {
-          bestVolume        = volume;
-          bestRotation      = localOptimizer.getBestRotation();
-          timeSinceLastBest = 0;
-          continue;
-        }
-      }
-      else
-      {
-        // Skip random search of more points
-        //break;
-      }
-
-      ++timeSinceLastBest;
-      if(timeSinceLastBest > config.K)
-      {
-        break;
-      }
-    }
+    // Generate random normalized point
+    glm::vec3 point = randomDirection();
 
     // Set position to the point
-    // std::cout << "Optimizing best candidate...\n";
-    co_await requestVolumeForQuat(bestRotation, true);
-    currentVolume   = bestVolume;
-    currentRotation = bestRotation;
+    co_await requestVolumeForPosition(point);
 
-    if(globalBestbestVolume > currentVolume)
+    // Run local optimizer
+    HookeJeeves localOptimizer = HookeJeeves(*this, config.KPointsDeltaStart, config.KPointsDeltaEnd, config.KPointsMaxSteps);
+    co_await localOptimizer.optimize();
+
+    float volume = localOptimizer.getBestVolume();
+
+    // Store if better
+    if(volume < bestVolume)
     {
-      globalBestbestVolume    = currentVolume;
-      globalBestRotation      = currentRotation;
-      timeSinceLastGlobalBest = 0;
+      bestVolume        = volume;
+      bestRotation      = localOptimizer.getBestRotation();
+      timeSinceLastBest = 0;
       continue;
     }
 
-    ++timeSinceLastGlobalBest;
-    if(timeSinceLastGlobalBest > config.KGlobal)
+    ++timeSinceLastBest;
+    if(timeSinceLastBest > config.K)
     {
       break;
     }
   }
 
-  co_await requestVolumeForQuat(globalBestRotation, true);
+  co_await requestVolumeForQuat(bestRotation, true);
 
   // Optimize further
   HookeJeeves localOptimizer = HookeJeeves(*this, config.LastPointDeltaStart, config.LastPointDeltaEnd, config.LastPointMaxSteps);
   co_await localOptimizer.optimize();
 
-  bestVolume   = localOptimizer.getBestVolume();
-  bestRotation = localOptimizer.getBestRotation();
+  if(bestVolume > localOptimizer.getBestVolume())
+  {
+    bestVolume   = localOptimizer.getBestVolume();
+    bestRotation = localOptimizer.getBestRotation();
+  }
 
   std::cout << "Best volume is:" << bestVolume << "\n";
 
