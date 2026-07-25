@@ -22,13 +22,14 @@ public:
   void     deinit();
 
   void  runCompute(VkCommandBuffer cmd, int elementCount, nvvk::Buffer* srcBuffer, nvvk::Buffer* dstBuffer);
-  void  recordCopyResultToStaging(VkCommandBuffer cmd);
   bool  IsResultBufferValid() { return resultBuffer != nullptr; }
   float readResult();
 
   int calculateMaxGroups(int elementCount);
 
 private:
+  void recordCopyResultToStaging(VkCommandBuffer cmd);
+
   nvvk::ResourceAllocator* m_alloc{};
 
   VkDevice             m_device{};

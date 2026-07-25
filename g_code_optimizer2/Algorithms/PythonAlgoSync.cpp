@@ -1,7 +1,10 @@
 #include "PythonAlgoSync.hpp"
+#include "include/app_config.hpp"
 
 PythonAlgoSync::PythonAlgoSync()
 {
+  has_timeout = !AppConfig::instance().is_headless;
+
   // Map shared memory
   hMapFile = CreateFileMappingA(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(SharedData), "g_code_optimizer2_shm");
   if(hMapFile == nullptr)
@@ -44,10 +47,11 @@ inline AlgoTask PythonAlgoSync::algorithmLogic()
   while(true)
   {
     // Wait for request
-    if(WaitForSingleObject(sem_request, 16) == WAIT_TIMEOUT)
+    if(WaitForSingleObject(sem_request, has_timeout ? 16 : INFINITE) == WAIT_TIMEOUT)
     {
       // Give control to the main thread when waiting for too long
       co_await requestVolumeForMove({0, 0});
+      continue;
     }
 
     // Read shared memory and write to shared memory

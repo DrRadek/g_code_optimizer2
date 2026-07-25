@@ -1,12 +1,22 @@
 cmake_minimum_required(VERSION 3.22...3.31)
 project(g_code_optimizer2 VERSION 1.0 LANGUAGES C CXX)
 
+# C++ version
+set(CMAKE_CXX_STANDARD 20 CACHE STRING "C++ standard" FORCE)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+if(MSVC)
+  add_compile_options(/std:c++20)
+else()
+  add_compile_options(-std=c++20)
+endif()
+
 # Here we can set the Slang version to use (uncomment to override the default)
 # set(Slang_VERSION "2025.20" CACHE STRING "Version of Slang to use")
 
 # Add the cmake folder to the module path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-find_package(NvproCore2 REQUIRED)
+# find_package(NvproCore2 REQUIRED)
 
 # Include the RtTutorial common functions
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/RtTutorial.cmake")

@@ -1,6 +1,9 @@
 // Enable the use of Nsight Aftermath for crash tracking and shader debugging
 // #define USE_NSIGHT_AFTERMATH  // (not always on, as it slows down the application)
 
+// Slow flag for benchmark before and after
+#define USE_SLOW_OBB
+#undef USE_SLOW_OBB
 
 #define TINYGLTF_IMPLEMENTATION         // Implementation of the GLTF loader library
 #define STB_IMAGE_IMPLEMENTATION        // Implementation of the image loading library
@@ -38,7 +41,6 @@
 #include <nvvk/debug_util.hpp>
 #include <nvvk/resource_allocator.hpp>
 
-#include <nvslang/slang.hpp>                 // Slang compiler
 #include <nvutils/camera_manipulator.hpp>    // Camera manipulator
 #include <nvutils/logger.hpp>                // Logger for debug messages
 #include <nvutils/timers.hpp>                // Timers for profiling
@@ -63,9 +65,8 @@
 // STL utils
 #include "stl_utils.hpp"
 
-// AABB calculation
-#include "aabb_compute.hpp"
-#include "_autogen/aabb_compute.slang.h"
+// OBB calculation
+#include "obb_compute.hpp"
 
 // Volume integration
 #include "volume_integrate_compute.hpp"
@@ -86,9 +87,18 @@
 // Python
 #include "python_volume_forwarder.hpp"
 
+// Benchmark for OBB
+#include "obb_benchmark.hpp"
+
 // Json, app config
 #include "include/json_helpers.hpp"
 #include "include/app_config.hpp"
+
+// OpenMP
+#include <omp.h>
+
+// GLFW
+#include <GLFW/glfw3.h>
 
 static const std::map<std::string, AlgorithmType> stringToAlgoType{{"test", AlgorithmType::Test},
                                                                    {"basic", AlgorithmType::UniformPoints},
@@ -129,6 +139,7 @@ public:
     // Statistics
     unsigned int runs        = 1;
     unsigned int maxEvals    = 0;
+    float        targetVal   = 0;
     std::string  outputStats = "";
 
     // Used by Cura Voxelizer
@@ -157,6 +168,8 @@ public:
   // - Called when the application initialize
   void onAttach(nvapp::Application* app) override
   {
+
+
     if(inputs.textureResolution != 0)
     {
       // Set fixed texture resolution size
@@ -194,13 +207,12 @@ public:
     // The VMA allocator is used for all allocations, the staging uploader will use it for staging buffers and images
     m_stagingUploader.init(&m_allocator, true);
 
-#if defined(AFTERMATH_AVAILABLE)
-    // This aftermath callback is used to report the shader hash (Spirv) to the Aftermath library.
-    m_slangCompiler.setCompileCallback([&](const std::filesystem::path& sourceFile, const uint32_t* spirvCode, size_t spirvSize) {
-      std::span<const uint32_t> data(spirvCode, spirvSize / sizeof(uint32_t));
-      AftermathCrashTracker::getInstance().addShaderBinary(data);
-    });
-#endif
+    constexpr bool benchmark_obb = false;
+    if(benchmark_obb)
+    {
+      OBB_Benchmark(*m_app, m_allocator).Start();
+      throw std::runtime_error("Benchmark finished.");
+    }
 
     // Acquiring the texture sampler which will be used for displaying the GBuffer
     m_samplerPool.init(app->getDevice());
@@ -258,15 +270,17 @@ public:
       createRayTracingPipeline();        // Create pipeline structure and SBT
     }
 
-    m_aabbCompute.cleanupAfterInit(&m_allocator);
+    if(m_useGpuForOBB)
+      m_obbCompute.cleanupAfterInit();
+
     m_volumeIntegrateCompute.init(&m_allocator, volume_integrate_slang);
     m_volumeSumCompute.init(&m_allocator, volumesum_compute_slang);
 
     // Calculate limits
     {
       updateViewMatrixFromCamera();
-      RecalculateAABB();
-      maxSupportHeight = glm::distance(aabbMin, aabbMax);
+      RecalculateOBB();
+      maxSupportHeight = glm::distance(obbMin, obbMax);
       minCellSize      = maxSupportHeight / (float)maxResolutionHeight;
 
       std::cout << "max support height: " << maxSupportHeight << "\n";
@@ -279,7 +293,7 @@ public:
         throw std::runtime_error(error);
       }
 
-      maxVolume = (aabbMax.x - aabbMin.x) * (aabbMax.y - aabbMin.y) * (aabbMax.z - aabbMin.z);
+      maxVolume = (obbMax.x - obbMin.x) * (obbMax.y - obbMin.y) * (obbMax.z - obbMin.z);
     }
 
     // Load algo type to start
@@ -341,7 +355,10 @@ public:
 
     m_gBuffers.deinit();
     m_stagingUploader.deinit();
-    m_aabbCompute.deinit();
+
+    if(m_useGpuForOBB)
+      m_obbCompute.deinit();
+
     m_volumeIntegrateCompute.deinit();
     m_volumeSumCompute.deinit();
     m_samplerPool.deinit();
@@ -359,11 +376,17 @@ public:
     m_allocator.deinit();
   }
 
+  // Workaround to trigger update on max resolution change
+  VkExtent2D lastViewportSize;
+
   //---------------------------------------------------------------------------------------------------------------
   // Rendering all UI elements, this includes the image of the GBuffer, and the camera controls.
   // - Called every frame
   void onUIRender() override
   {
+    if(inputs.headless)
+      return;
+
     namespace PE = nvgui::PropertyEditor;
 
     bool isAlgoRunning = m_algo->isAlgorithmRunning();
@@ -402,8 +425,8 @@ public:
       if(ImGui::CollapsingHeader("Algorith settings", ImGuiTreeNodeFlags_DefaultOpen))
       {
         PE::begin();
-        PE::SliderFloat3("Min aabb", glm::value_ptr(aabbMin), -21.0f, 21.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp, "Override aabb min");
-        PE::SliderFloat3("Max aabb", glm::value_ptr(aabbMax), -21.0f, 21.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp, "Override aabb max");
+        PE::SliderFloat3("Min obb", glm::value_ptr(obbMin), -21.0f, 21.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp, "Override obb min");
+        PE::SliderFloat3("Max obb", glm::value_ptr(obbMax), -21.0f, 21.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp, "Override obb max");
         PE::SliderFloat("volume", &volume, 1e5, 1e8, "%.2f", ImGuiSliderFlags_AlwaysClamp, "volume");
         PE::SliderFloat("min volume", &minVolume, 1e5, 1e8, "%.2f", ImGuiSliderFlags_AlwaysClamp, "min volume");
 
@@ -434,6 +457,14 @@ public:
 
         if(maxWidthChanged || maxHeightChanged)
         {
+          // Workaround to trigger resize
+          if(!maxResolutionChanged && !skipMaxResolutionUpdate)
+          {
+            auto handle       = m_app->getWindowHandle();
+            auto viewportSize = ImGui::FindWindowByName("Viewport")->Viewport->Size;
+            glfwSetWindowSize(handle, viewportSize.x, viewportSize.y + 1);
+          }
+
           maxResolutionChanged     = true;
           currentResolutionChanged = true;
         }
@@ -476,7 +507,8 @@ public:
   // - Called when the Window "viewport is resized
   void onResize(VkCommandBuffer cmd, const VkExtent2D& size)
   {
-    // No longer needed, viewport resolution is unrelated to render resolution
+    // Update max resolution when it is safe to do so
+    updateMaxResolution();
   }
 
   void resizeBuffers(VkCommandBuffer cmd, const VkExtent2D& size)
@@ -507,7 +539,13 @@ public:
     NVVK_DBG_NAME(m_outVolumeBufferForReduction.buffer);
   }
 
+  bool skipFrame = false;
+  bool skipMaxResolutionUpdate = true;
   void onPreRender() {}
+
+  // TODO: move somewhere else
+  VkSemaphore semaphore{};
+  uint64_t    semaphore_pValues;
 
   //---------------------------------------------------------------------------------------------------------------
   // Rendering the scene
@@ -517,6 +555,12 @@ public:
   void onRender(VkCommandBuffer cmd)
   {
     NVVK_DBG_SCOPE(cmd);  // <-- Helps to debug in NSight
+
+    if(skipFrame)
+    {
+      skipFrame = false;
+      return;
+    }
 
     // Calculate volume
     GetVolumeCalculationResult();
@@ -532,8 +576,8 @@ public:
     // Update view matrix
     updateViewMatrixFromCamera();
 
-    // Recalculate AABB
-    RecalculateAABB();
+    // Recalculate OBB
+    RecalculateOBB();
 
     // Update resolution to fit the space
     updateResolution();
@@ -564,7 +608,8 @@ public:
 
 
     // Barrier to make sure the image is ready for been display
-    nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
+    if(!inputs.headless)
+      nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT);
   }
 
   //---------------------------------------------------------------------------------------------------------------
@@ -572,6 +617,9 @@ public:
   // - Called when the ImGui menu is rendered
   void onUIMenu() override
   {
+    if(inputs.headless)
+      return;
+
     bool reload = false;
     if(ImGui::BeginMenu("Tools"))
     {
@@ -697,10 +745,6 @@ public:
   {
     SCOPED_TIMER(__FUNCTION__);
 
-    // Use pre-compiled shaders
-    VkShaderModuleCreateInfo shaderCode = nvsamples::getShaderModuleCreateInfo(volume_calculation_raster_slang);
-    //auto slang = std::span(volume_calculation_raster_slang);
-
     // Destroy the previous shaders if they exist
     vkDestroyShaderEXT(m_app->getDevice(), m_vertexShader, nullptr);
     vkDestroyShaderEXT(m_app->getDevice(), m_fragmentShader, nullptr);
@@ -728,8 +772,8 @@ public:
     shaderInfo.nextStage = VK_SHADER_STAGE_FRAGMENT_BIT;
     shaderInfo.pName     = "vertexMain";  // The entry point of the vertex shader
 
-    shaderInfo.codeSize = shaderCode.codeSize;  // All shaders are in the same spirv
-    shaderInfo.pCode    = shaderCode.pCode;
+    shaderInfo.codeSize = volume_calculation_raster_slang_sizeInBytes;  // All shaders are in the same spirv
+    shaderInfo.pCode    = volume_calculation_raster_slang;
 
     vkCreateShadersEXT(m_app->getDevice(), 1U, &shaderInfo, nullptr, &m_vertexShader);
     NVVK_DBG_NAME(m_vertexShader);
@@ -760,12 +804,12 @@ public:
   {
     NVVK_DBG_SCOPE(cmd);  // <-- Helps to debug in NSight
 
-    float     width      = aabbMax.x - aabbMin.x;
-    float     height     = aabbMax.y - aabbMin.y;
+    float     width      = obbMax.x - obbMin.x;
+    float     height     = obbMax.y - obbMin.y;
     float     halfStepX  = 0.5f * width / float(m_currentRenderResolution.width - 1);
     float     halfStepY  = 0.5f * height / float(m_currentRenderResolution.height - 1);
-    glm::mat4 projMatrix = glm::orthoRH_ZO(aabbMin.x - halfStepX, aabbMax.x + halfStepX, aabbMax.y + halfStepY,
-                                           aabbMin.y - halfStepY, -aabbMax.z, -aabbMin.z);
+    glm::mat4 projMatrix = glm::orthoRH_ZO(obbMin.x - halfStepX, obbMax.x + halfStepX, obbMax.y + halfStepY,
+                                           obbMin.y - halfStepY, -obbMax.z, -obbMin.z);
 
     m_sceneResource.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;   // Combine the view and projection matrices
     m_sceneResource.sceneInfo.projInvMatrix  = glm::inverse(projMatrix);  // Inverse projection matrix
@@ -796,8 +840,8 @@ public:
 
     // Push constant information, see usage later
     shaderio::TutoPushConstant pushValues{.sceneInfoAddress = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,  // Pass the address of the scene information buffer to the shader
-                                          .aabbMin          = aabbMin,
-                                          .aabbMax          = aabbMax,
+                                          .obbMin          = obbMin,
+                                          .obbMax          = obbMax,
                                           .maxSupportHeight = maxSupportHeight};
     const VkPushConstantsInfo pushInfo{
         .sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
@@ -1171,8 +1215,8 @@ public:
 
     // Push constant information
     shaderio::RtxPushConstant pushValues{.sceneInfoAddress = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,
-                                         .aabbMin          = aabbMin,
-                                         .aabbMax          = aabbMax,
+                                         .obbMin          = obbMin,
+                                         .obbMax          = obbMax,
                                          .maxSupportHeight = maxSupportHeight};
     const VkPushConstantsInfo pushInfo{.sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
                                        .layout     = m_rtPipelineLayout,
@@ -1194,28 +1238,178 @@ public:
                                       {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}});
   }
 
-  // Recalculate AABB (GPU implementation)
-  void RecalculateAABB()
+  // Recalculate OBB (GPU implementation)
+  void RecalculateOBB()
   {
-    VkCommandBuffer cmd = m_app->createTempCmdBuffer();
 
-    auto sceneInfo = m_sceneResource.bSceneInfo;
-    auto matrix    = viewInvMatrix;
+    //auto sceneInfo = m_sceneResource.bSceneInfo;
 
-    m_aabbCompute.runCompute(cmd, matrix);
-    m_app->submitAndWaitTempCmdBuffer(cmd);
+    if(m_useGpuForOBB)
+    {
+      VkCommandBuffer cmd    = m_app->createTempCmdBuffer();
+      auto            matrix = viewInvMatrix;
+      m_obbCompute.runCompute(cmd, matrix);
+      m_app->submitAndWaitTempCmdBuffer(cmd);
 
-    auto result = m_aabbCompute.readResult(&m_allocator);
-    aabbMin     = result.min;
-    aabbMax     = result.max;
+      auto result = m_obbCompute.readResult();
+      obbMin     = result.min;
+      obbMax     = result.max;
+    }
+    else
+    {
+      auto matrix = ((glm::mat3x3)viewInvMatrix);
 
-    aabbMax.z += glm::max(aabbMax.z * 0.00001f, 0.001f);  // Add small epsilon
+#ifdef USE_SLOW_OBB
+      obbMin = obbVertices[0];
+      obbMax = obbMin;
+
+      const size_t n = obbVertices.size();
+      for(size_t i = 1; i < n; ++i)
+      {
+        const auto& multiplied = obbVertices[i] * matrix;
+
+        obbMax[0] = std::max(obbMax[0], multiplied[0]);
+        obbMin[0] = std::min(obbMin[0], multiplied[0]);
+        obbMax[1] = std::max(obbMax[1], multiplied[1]);
+        obbMin[1] = std::min(obbMin[1], multiplied[1]);
+        obbMax[2] = std::max(obbMax[2], multiplied[2]);
+        obbMin[2] = std::min(obbMin[2], multiplied[2]);
+      }
+#else
+
+      const size_t n = obbVerticesX.size();
+
+      const float* vx_data = obbVerticesX.data();
+      const float* vy_data = obbVerticesY.data();
+      const float* vz_data = obbVerticesZ.data();
+
+      float minX, minY, minZ;
+      float maxX, maxY, maxZ;
+
+      minX = minY = minZ = std::numeric_limits<float>::max();
+      maxX = maxY = maxZ = std::numeric_limits<float>::lowest();
+
+#pragma omp parallel num_threads(8)
+      {
+        int tid      = omp_get_thread_num();
+        int nthreads = omp_get_num_threads();
+
+        int chunk = ((n + nthreads - 1) / nthreads + 7) & ~7;  // round up to multiple of 8
+
+        int start = tid * chunk;
+        int end   = start + chunk < n ? start + chunk : n;
+
+        glm::vec3 min{};
+        glm::vec3 max{};
+        ProcessOBBChunk(matrix, min, max, start, end);
+
+#pragma omp critical
+        {
+          minX = std::min(minX, min.x);
+          minY = std::min(minY, min.y);
+          minZ = std::min(minZ, min.z);
+
+          maxX = std::max(maxX, max.x);
+          maxY = std::max(maxY, max.y);
+          maxZ = std::max(maxZ, max.z);
+        }
+      }
+
+      obbMin = {minX, minY, minZ};
+      obbMax = {maxX, maxY, maxZ};
+#endif
+    }
+
+    obbMax.z += glm::max(obbMax.z * 0.00001f, 0.001f);  // Add small epsilon
   }
+
+#ifndef USE_SLOW_OBB
+  void ProcessOBBChunk(glm::mat3x3& matrix, glm::vec3& min_result, glm::vec3& max_result, size_t start, size_t end)
+  {
+    __m256 r00 = _mm256_set1_ps(matrix[0][0]);
+    __m256 r01 = _mm256_set1_ps(matrix[0][1]);
+    __m256 r02 = _mm256_set1_ps(matrix[0][2]);
+
+    __m256 r10 = _mm256_set1_ps(matrix[1][0]);
+    __m256 r11 = _mm256_set1_ps(matrix[1][1]);
+    __m256 r12 = _mm256_set1_ps(matrix[1][2]);
+
+    __m256 r20 = _mm256_set1_ps(matrix[2][0]);
+    __m256 r21 = _mm256_set1_ps(matrix[2][1]);
+    __m256 r22 = _mm256_set1_ps(matrix[2][2]);
+
+    // 2) Init min/max values
+    __m256 minXv = _mm256_set1_ps(std::numeric_limits<float>::max());
+    __m256 minYv = _mm256_set1_ps(std::numeric_limits<float>::max());
+    __m256 minZv = _mm256_set1_ps(std::numeric_limits<float>::max());
+    __m256 maxXv = _mm256_set1_ps(std::numeric_limits<float>::lowest());
+    __m256 maxYv = _mm256_set1_ps(std::numeric_limits<float>::lowest());
+    __m256 maxZv = _mm256_set1_ps(std::numeric_limits<float>::lowest());
+
+    // Calculate
+    for(size_t i = start; i < end; i += 8)
+    {
+      // load 8 values from the X,Y,Z vectors
+      __m256 vx = _mm256_load_ps(&obbVerticesX[i]);
+      __m256 vy = _mm256_load_ps(&obbVerticesY[i]);
+      __m256 vz = _mm256_load_ps(&obbVerticesZ[i]);
+
+      // " Fused multiply + add"
+      // r02 * vz + r01 * vy + r00 * vx
+      __m256 rx = _mm256_fmadd_ps(r02, vz, _mm256_fmadd_ps(r01, vy, _mm256_mul_ps(r00, vx)));
+
+      __m256 ry = _mm256_fmadd_ps(r12, vz, _mm256_fmadd_ps(r11, vy, _mm256_mul_ps(r10, vx)));
+
+      __m256 rz = _mm256_fmadd_ps(r22, vz, _mm256_fmadd_ps(r21, vy, _mm256_mul_ps(r20, vx)));
+
+      // store min/max
+      minXv = _mm256_min_ps(minXv, rx);
+      maxXv = _mm256_max_ps(maxXv, rx);
+      minYv = _mm256_min_ps(minYv, ry);
+      maxYv = _mm256_max_ps(maxYv, ry);
+      minZv = _mm256_min_ps(minZv, rz);
+      maxZv = _mm256_max_ps(maxZv, rz);
+    }
+
+    // Horizontal min/max reducers
+    auto hmin = [](__m256 v) {
+      __m128 lo = _mm256_castps256_ps128(v);    // v[0...3]
+      __m128 hi = _mm256_extractf128_ps(v, 1);  // v[4...7]
+      __m128 m  = _mm_min_ps(lo, hi);           // m[0..3] = min(v[0..3],v[4..7])
+
+      // https://www.intel.com/content/www/us/en/docs/intrinsics-guide/index.html#text=_mm_movehl_ps&ig_expand=4591
+      // _mm_movehl_ps(m,m)... temp[0..3] = [m[2],m[3],m[2],m[3]] ... moves high half to low half
+      // m[0..1] = [min(m[0],temp[0]), min(m[1],temp[1])] = [min(m[0],m[2]), min(m[1],m[3])]
+      m = _mm_min_ps(m, _mm_movehl_ps(m, m));
+      //m         = _mm_min_ps(m, _mm_shuffle_ps(m, m, 0x55));
+
+      // _MM_SHUFFLE(1, 1, 1, 1) => temp[0..3] = m[1,1,1,1]
+      // m = min(m[0..3],temp[0..3]) = min(m[0..3],m[1,1,1,1])
+      m = _mm_min_ps(m, _mm_permute_ps(m, _MM_SHUFFLE(1, 1, 1, 1)));
+      // extract first float and return
+      return _mm_cvtss_f32(m);
+    };
+
+    auto hmax = [](__m256 v) {
+      __m128 lo = _mm256_castps256_ps128(v);
+      __m128 hi = _mm256_extractf128_ps(v, 1);
+      __m128 m  = _mm_max_ps(lo, hi);
+      m         = _mm_max_ps(m, _mm_movehl_ps(m, m));
+      //m         = _mm_max_ps(m, _mm_shuffle_ps(m, m, 0x55));
+      m = _mm_max_ps(m, _mm_permute_ps(m, _MM_SHUFFLE(1, 1, 1, 1)));
+
+      return _mm_cvtss_f32(m);
+    };
+
+    min_result = {hmin(minXv), hmin(minYv), hmin(minZv)};
+    max_result = {hmax(maxXv), hmax(maxYv), hmax(maxZv)};
+  }
+#endif
 
   void IntegrateVolume(VkCommandBuffer cmd)
   {
-    float width  = (aabbMax.x - aabbMin.x);
-    float height = (aabbMax.y - aabbMin.y);
+    float width  = (obbMax.x - obbMin.x);
+    float height = (obbMax.y - obbMin.y);
 
     // (n) * (m) => (n-1) * (m-1)
     m_volumeIntegrateCompute.runCompute(cmd, m_gBuffers.getColorImageView(eImgVolume), &m_outVolumeBuffer,
@@ -1236,11 +1430,21 @@ public:
   {
     if(m_volumeSumCompute.IsResultBufferValid())
     {
-      VkCommandBuffer copyCmd = m_app->createTempCmdBuffer();
-      m_volumeSumCompute.recordCopyResultToStaging(copyCmd);
-      m_app->submitAndWaitTempCmdBuffer(copyCmd);
+      //
+      const VkSemaphoreWaitInfo waitInfo = {
+          .sType          = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+          .semaphoreCount = 1,
+          .pSemaphores    = &semaphore,
+          .pValues        = &semaphore_pValues,
+      };
+      vkWaitSemaphores(m_app->getDevice(), &waitInfo, std::numeric_limits<uint64_t>::max());
+
+      //VkCommandBuffer copyCmd = m_app->createTempCmdBuffer();
+      //m_volumeSumCompute.recordCopyResultToStaging(copyCmd);
+      //m_app->submitAndWaitTempCmdBuffer(copyCmd);
 
       volume = m_volumeSumCompute.readResult();
+      //std::cout << " volume is:"  << volume << "\n";
 
       if(minVolume > volume)
       {
@@ -1255,6 +1459,10 @@ public:
       // First frame doesn't have a reference to a buffer yet
       std::cout << "First frame, skipping getting calculation result\n\n";
     }
+
+    auto [sem, sem_pValues] = m_app->getFrameSignalSemaphore();
+    semaphore               = std::move(sem);
+    semaphore_pValues       = std::move(sem_pValues);
   }
 
   bool RunAlgorithm()
@@ -1274,7 +1482,7 @@ public:
       std::cout << "starting algorithm...\n";
       // Request to start the algorithm
       algoStartTime = std::chrono::steady_clock::now();
-      response      = m_algo->startAlgorithm(selectedAlgo, inputs.maxEvals);
+      response      = m_algo->startAlgorithm(selectedAlgo, inputs.maxEvals, inputs.targetVal);
       m_camera->disableInteractive();
       startAlgorithm = false;
     }
@@ -1292,6 +1500,7 @@ public:
   {
     if(m_algo->isAlgorithmRunning())
     {
+      std::cout << "Best volume is: " << minVolume << "\n";
       std::cout << "Program init took " << programInitTime << "\n";
       auto algo_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - algoStartTime);
       std::cout << "Algorithm finished in: " << algo_time << "\n";
@@ -1360,7 +1569,10 @@ public:
 
       // Read result
       auto result = m_algo->getAlgorithmResult();
-      m_camera->setRotation(result.bestRotation);
+      if(minVolume < result.bestVolume)
+        std::cout << "Note: algorithm returned worse best than program (" << result.bestVolume << ")\n";
+
+      m_camera->setRotation(bestRotation);
 
       cameraChangeRequested = false;
 
@@ -1381,7 +1593,7 @@ public:
       updateViewMatrixFromCamera();
 
       // Run algorithm again with updated camera position
-      auto response = m_algo->runAlgorithm({0, m_camera->getRotation()});
+      auto response = m_algo->runAlgorithm({std::numeric_limits<float>::max(), m_camera->getRotation()});
 
       // wait again in case of skip
       return HandleAlgorithResponse(response);
@@ -1509,8 +1721,38 @@ public:
 
     // Import the data
     nvsamples::importStlData(m_sceneResource, triangles, m_stagingUploader);
-    auto vertices = nvsamples::exportVerticesFromStlTriangles(triangles);
-    m_aabbCompute.init(cmd, &m_allocator, std::span(aabb_compute_slang), vertices);
+
+    if(m_useGpuForOBB)
+    {
+      std::vector<glm::vec3> vertices = nvsamples::exportVerticesFromStlTriangles(triangles);
+      m_obbCompute.init(cmd, &m_allocator, vertices);
+    }
+    else
+    {
+#ifdef USE_SLOW_OBB
+      obbVertices = nvsamples::exportVerticesFromStlTriangles(triangles);
+#else
+      auto [X, Y, Z]     = nvsamples::exportXYZFromStlTriangles(triangles);
+      int n              = X.size();
+      int padding        = 8 - n % 8;
+      int aligned_8_size = n + padding;
+
+      X.resize(aligned_8_size);
+      Y.resize(aligned_8_size);
+      Z.resize(aligned_8_size);
+
+      for(int i = n; i < aligned_8_size; ++i)
+      {
+        X[i] = X[i - 1];
+        Y[i] = Y[i - 1];
+        Z[i] = Z[i - 1];
+      }
+
+      obbVerticesX = std::move(X);
+      obbVerticesY = std::move(Y);
+      obbVerticesZ = std::move(Z);
+#endif
+    }
   }
   void SaveResult()
   {
@@ -1560,8 +1802,8 @@ public:
 
   void updateResolution()
   {
-    float width  = aabbMax.x - aabbMin.x;
-    float height = aabbMax.y - aabbMin.y;
+    float width  = obbMax.x - obbMin.x;
+    float height = obbMax.y - obbMin.y;
     // dynamically calculate n, m to keep fixed area size
     if(useFixedAreaResolution)
     {
@@ -1588,14 +1830,31 @@ public:
       m_currentRenderResolution = {(unsigned int)currentResolutionWidth, (unsigned int)currentResolutionHeight};
       currentResolutionChanged  = false;
     }
-    /*if(maxResolutionChanged)
+  }
+
+  void updateMaxResolution() {
+    if(skipMaxResolutionUpdate)
+    {
+      maxResolutionChanged = false;
+      skipMaxResolutionUpdate = false;
+      return;
+    }
+
+    if(maxResolutionChanged)
     {
       m_maxRenderResolution = {(unsigned int)maxResolutionWidth, (unsigned int)maxResolutionHeight};
       maxResolutionChanged  = false;
       auto cmd              = m_app->createTempCmdBuffer();
       resizeBuffers(cmd, m_maxRenderResolution);
       m_app->submitAndWaitTempCmdBuffer(cmd);
-    }*/
+      skipFrame = true;
+      skipMaxResolutionUpdate = true;
+
+      // Workaround: revert resize change and ignore next resize
+      auto handle       = m_app->getWindowHandle();
+      auto viewportSize = ImGui::FindWindowByName("Viewport")->Viewport->Size;
+      glfwSetWindowSize(handle, viewportSize.x, viewportSize.y - 1);
+    }
   }
 
   // Camera
@@ -1657,11 +1916,11 @@ private:
   //shaderio::float4x4          bestMatrixFromAlgo;
   //float                       minVolumeFromAlgo = std::numeric_limits<float>().max();
 
-  // AABB
-  nvshaders::AABBCompute m_aabbCompute{};
-  glm::vec3              aabbMin{-40, -40, -40};
-  glm::vec3              aabbMax{40, 40, 40};
-  // Used to calculate AABB
+  // OBB
+  nvshaders::OBBCompute m_obbCompute{};
+  glm::vec3              obbMin{-40, -40, -40};
+  glm::vec3              obbMax{40, 40, 40};
+  // Used to calculate OBB
   std::vector<openstl::Triangle> triangles;
 
   // CPU helper variables
@@ -1717,6 +1976,17 @@ private:
 
   // Ray tracing toggle
   bool m_useRayTracing = false;  // Set to true to use ray tracing, false for rasterization
+  bool m_useGpuForOBB = false;  // Set to true to use GPU for bounding box calculations, CPU if false
+
+#ifdef USE_SLOW_OBB
+  // Slow version
+  std::vector<glm::vec3> obbVertices{};
+#else
+  // Fast version
+  std::vector<float> obbVerticesX{};
+  std::vector<float> obbVerticesY{};
+  std::vector<float> obbVerticesZ{};
+#endif
 };
 
 
@@ -1725,7 +1995,7 @@ int handleExit(int error_code)
   if(error_code != 0)
   {
     std::cout << "Press any key to exit...\n";
-    std::cin.get();
+    //std::cin.get();
   }
   return error_code;
 }
@@ -1768,7 +2038,7 @@ int main(int argc, char** argv)
   reg.add({"textureResolution", "Texture resolution (higher = more precise, slower, max: 4096). Incompatible with voxelSpacing."},
           &inputs.textureResolution);
   reg.add({"voxelSpacing", "Uses dynamic texture resolution while keeping same distance between voxels (lower = more precise, slower). Incompatible with textureResolution."},
-          &inputs.voxelSpacing, 0);
+          &inputs.voxelSpacing, -1);
 
   // Inputs
   reg.add({"inputStl", "STL file to optimize (required)"}, &inputs.inputStl);
@@ -1779,6 +2049,7 @@ int main(int argc, char** argv)
   // Stats
   reg.add({"runs", "Number of runs (default 1, used for statistics)"}, &inputs.runs);
   reg.add({"maxEvals", "Maximum number of evaluations (force stop after maxEvals is exceeded)"}, &inputs.maxEvals);
+  reg.add({"targetVal", "Target value to reach (force stop after reaching this value)"}, &inputs.targetVal);
   reg.add({"outputStats", "Where to save/append statistics"}, &inputs.outputStats);
 
   // Internal
@@ -1791,6 +2062,7 @@ int main(int argc, char** argv)
 
   // Setup config
   AppConfig::instance().setBasePath(config != "" ? std::filesystem::path(config) : exePath.parent_path() / "config");
+  AppConfig::instance().is_headless = inputs.headless;
 
   // Read config from json
   auto configFile = AppConfig::instance().getInputParamsConfigPath();
@@ -1900,12 +2172,14 @@ int main(int argc, char** argv)
   }
 
   // Setting up the application
-  appInfo.name           = "Ray Tracing Tutorial";
-  appInfo.instance       = vkContext.getInstance();
-  appInfo.device         = vkContext.getDevice();
-  appInfo.physicalDevice = vkContext.getPhysicalDevice();
-  appInfo.queues         = vkContext.getQueueInfos();
-  appInfo.vSync          = false;
+  appInfo.name                    = "Ray Tracing Tutorial";
+  appInfo.instance                = vkContext.getInstance();
+  appInfo.device                  = vkContext.getDevice();
+  appInfo.physicalDevice          = vkContext.getPhysicalDevice();
+  appInfo.queues                  = vkContext.getQueueInfos();
+  appInfo.vSync                   = false;
+  appInfo.preferredFramesInFlight = 1;
+  appInfo.preferredImageCount     = 1;
 
 
   // Create the application
@@ -1961,6 +2235,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(GCodeOptimizer2::Inputs,
                                    outputStl,
                                    runs,
                                    maxEvals,
+                                   targetVal,
                                    outputStats,
                                    outputQuat,
                                    vertsFile,

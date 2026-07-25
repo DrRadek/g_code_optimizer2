@@ -36,8 +36,8 @@ enum BindingPoints
 struct RtxPushConstant
 {
   GltfSceneInfo* sceneInfoAddress;  // Address of the scene information buffer
-  float3         aabbMin;           // start of bounding box for volume calculation
-  float3         aabbMax;           // end of bounding box for volume calculation
+  float3         obbMin;           // start of bounding box for volume calculation
+  float3         obbMax;           // end of bounding box for volume calculation
   float			 maxSupportHeight;  // maximum support height (used for visualization only)
 };
 
@@ -48,30 +48,30 @@ struct TutoPushConstant
   float3x3       normalMatrix;
   int            instanceIndex;              // Instance index for the current draw call
   GltfSceneInfo* sceneInfoAddress;           // Address of the scene information buffer
-  float3         aabbMin;                    // start of bounding box for volume calculation
-  float3         aabbMax;                    // end of bounding box for volume calculation
+  float3         obbMin;                    // start of bounding box for volume calculation
+  float3         obbMax;                    // end of bounding box for volume calculation
   float          maxSupportHeight;           // maximum support height (used for visualization only)
 };
 
 
-// AABB
-#define AABB_SHADER_WG_SIZE 256
-static constexpr int AABB_SHADER_WG_SIZE_CPU = AABB_SHADER_WG_SIZE;
+// OBB
+#define OBB_SHADER_WG_SIZE 256
+static constexpr int OBB_SHADER_WG_SIZE_CPU = OBB_SHADER_WG_SIZE;
 
-struct AABB
+struct OBB
 {
   float3 min;
   float3 max;
 };
 
-enum aabb_Binding
+enum obb_Binding
 {
   Vertices    = 0,
-  PartialAabb = 1,
-  OutAabb     = 2
+  PartialObb = 1,
+  OutObb     = 2
 };
 
-struct aabb_Params
+struct obb_Params
 {
   uint     vertCount;
   uint     groupSize;

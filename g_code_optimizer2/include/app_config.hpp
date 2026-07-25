@@ -6,6 +6,8 @@ class AppConfig
   bool m_initialized = false;
 
 public:
+  bool is_headless = false;
+
   static AppConfig& instance()
   {
     static AppConfig s;

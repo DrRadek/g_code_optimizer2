@@ -1,0 +1,171 @@
+#include <array>
+
+#include "obb_compute.hpp"
+#include <nvvk/barriers.hpp>
+#include <nvvk/check_error.hpp>
+#include <nvvk/commands.hpp>
+#include <nvvk/compute_pipeline.hpp>
+#include <nvvk/debug_util.hpp>
+#include <nvvk/default_structs.hpp>
+
+#include "shaders/shaderio.h"
+
+#include <iostream>
+
+#include "_autogen/obb_compute.slang.h"
+
+VkResult nvshaders::OBBCompute::init(VkCommandBuffer cmd, nvvk::ResourceAllocator* alloc, std::vector<shaderio::float3>& vertices)
+{
+  const auto vertCount = vertices.size();
+  std::cout << "[OBB] amount of vertices is: " << vertCount << "\n";
+
+  const unsigned int ITEMS_PER_THREAD = 4;
+  const unsigned int vertsPerGroup    = shaderio::OBB_SHADER_WG_SIZE_CPU * ITEMS_PER_THREAD;
+  const unsigned int groupSize        = std::max(int(std::ceil(float(vertCount) / float(vertsPerGroup))), 1);
+
+  assert(!m_device);
+  m_alloc  = alloc;
+  m_device = alloc->getDevice();
+
+  // Create buffers
+  alloc->createBuffer(m_vertBuffer, sizeof(shaderio::float3) * vertCount, VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO);
+  NVVK_DBG_NAME(m_vertBuffer.buffer);
+  alloc->createBuffer(m_obbBuffer_partial, sizeof(shaderio::OBB) * groupSize, VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT,
+                      VMA_MEMORY_USAGE_AUTO);
+  NVVK_DBG_NAME(m_obbBuffer_partial.buffer);
+  alloc->createBuffer(m_obbBuffer_final, sizeof(shaderio::OBB), VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT, VMA_MEMORY_USAGE_AUTO,
+                      VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  NVVK_DBG_NAME(m_obbBuffer_final.buffer);
+
+  // Shader descriptor set layout
+  nvvk::DescriptorBindings bindings;
+  bindings.addBinding(shaderio::obb_Binding::Vertices, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+  bindings.addBinding(shaderio::obb_Binding::PartialObb, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+  bindings.addBinding(shaderio::obb_Binding::OutObb, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT);
+
+  NVVK_CHECK(m_descriptorPack.init(bindings, m_device, 0, VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR));
+  NVVK_DBG_NAME(m_descriptorPack.getLayout());
+
+  // Push constant
+  VkPushConstantRange pushConstantRange{.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT, .size = sizeof(shaderio::obb_Params)};
+
+  // Pipeline layout
+  const VkPipelineLayoutCreateInfo pipelineLayoutInfo{
+      .sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+      .setLayoutCount         = 1,
+      .pSetLayouts            = m_descriptorPack.getLayoutPtr(),
+      .pushConstantRangeCount = 1,
+      .pPushConstantRanges    = &pushConstantRange,
+  };
+  NVVK_FAIL_RETURN(vkCreatePipelineLayout(m_device, &pipelineLayoutInfo, nullptr, &m_pipelineLayout));
+  NVVK_DBG_NAME(m_pipelineLayout);
+
+  // Compute Pipeline
+  VkComputePipelineCreateInfo compInfo   = {VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO};
+  VkShaderModuleCreateInfo    shaderInfo = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+  compInfo.stage                         = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+  compInfo.stage.stage                   = VK_SHADER_STAGE_COMPUTE_BIT;
+  compInfo.stage.pNext                   = &shaderInfo;
+  compInfo.layout                        = m_pipelineLayout;
+
+  // All shaders are in the same spirv
+  shaderInfo.codeSize = obb_compute_slang_sizeInBytes;
+  shaderInfo.pCode    = obb_compute_slang;
+
+  // OBB pipeline pass 1
+  compInfo.stage.pName = "CalculateOBB_Pass1";
+  NVVK_FAIL_RETURN(vkCreateComputePipelines(m_device, nullptr, 1, &compInfo, nullptr, &m_obbPipelinePass1));
+  NVVK_DBG_NAME(m_obbPipelinePass1);
+
+  // OBB pipeline pass 2
+  compInfo.stage.pName = "CalculateOBB_Pass2";
+  NVVK_FAIL_RETURN(vkCreateComputePipelines(m_device, nullptr, 1, &compInfo, nullptr, &m_obbPipelinePass2));
+  NVVK_DBG_NAME(m_obbPipelinePass2);
+
+  // Allocate data
+  //nvvk::Buffer stagingBuffer;
+  alloc->createBuffer(stagingBuffer, sizeof(shaderio::float3) * vertCount, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                      VMA_MEMORY_USAGE_CPU_TO_GPU, VMA_ALLOCATION_CREATE_MAPPED_BIT);
+  memcpy(stagingBuffer.mapping, vertices.data(), sizeof(shaderio::float3) * vertCount);
+  VkBufferCopy copyRegion{};
+  copyRegion.srcOffset = 0;
+  copyRegion.dstOffset = 0;
+  copyRegion.size      = sizeof(shaderio::float3) * vertCount;
+  vkCmdCopyBuffer(cmd, stagingBuffer.buffer, m_vertBuffer.buffer, 1, &copyRegion);
+
+  // Update push constant
+  obb_params_data.vertCount = (shaderio::uint)vertCount;
+  obb_params_data.groupSize = groupSize;
+
+  // Create WriteSetContainer
+  //nvvk::WriteSetContainer writeSetContainer;
+  writeSetContainer.append(m_descriptorPack.makeWrite(shaderio::obb_Binding::Vertices), m_vertBuffer);
+  writeSetContainer.append(m_descriptorPack.makeWrite(shaderio::obb_Binding::PartialObb), m_obbBuffer_partial);
+  writeSetContainer.append(m_descriptorPack.makeWrite(shaderio::obb_Binding::OutObb), m_obbBuffer_final);
+
+  return VK_SUCCESS;
+}
+
+void nvshaders::OBBCompute::cleanupAfterInit()
+{
+  m_alloc->destroyBuffer(stagingBuffer);
+}
+
+void nvshaders::OBBCompute::deinit()
+{
+  if(!m_device)
+    return;
+
+  writeSetContainer.clear();
+
+  m_alloc->destroyBuffer(m_vertBuffer);
+  m_alloc->destroyBuffer(m_obbBuffer_partial);
+  m_alloc->destroyBuffer(m_obbBuffer_final);
+
+  vkDestroyPipeline(m_device, m_obbPipelinePass1, nullptr);
+  vkDestroyPipeline(m_device, m_obbPipelinePass2, nullptr);
+  vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
+  m_descriptorPack.deinit();
+
+  m_pipelineLayout    = VK_NULL_HANDLE;
+  m_obbPipelinePass1 = VK_NULL_HANDLE;
+  m_obbPipelinePass2 = VK_NULL_HANDLE;
+  m_device            = VK_NULL_HANDLE;
+}
+
+void nvshaders::OBBCompute::runCompute(VkCommandBuffer cmd, const shaderio::float4x4 projInvMatrix)
+{
+  // Push constant
+  obb_params_data.projInvMatrix = projInvMatrix;
+
+  vkCmdPushConstants(cmd, m_pipelineLayout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(shaderio::obb_Params), &obb_params_data);
+
+
+  vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_pipelineLayout, 0, writeSetContainer.size(),
+                            writeSetContainer.data());
+
+  // Run pass 1 - calculate min/max + reduction within WG
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_obbPipelinePass1);
+  vkCmdDispatch(cmd, obb_params_data.groupSize, 1, 1);
+
+  // Barrier
+  nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                         VK_ACCESS_2_SHADER_WRITE_BIT, VK_ACCESS_2_SHADER_READ_BIT);
+
+  // Run pass 2 - final reduction on one WG
+  vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_obbPipelinePass2);
+  vkCmdDispatch(cmd, 1, 1, 1);
+
+  // Barrier
+  nvvk::cmdMemoryBarrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_2_HOST_BIT,
+                         VK_ACCESS_2_SHADER_WRITE_BIT, VK_ACCESS_2_HOST_READ_BIT);
+}
+
+shaderio::OBB nvshaders::OBBCompute::readResult()
+{
+  // Invalidate in case of non-coherent memory
+  m_alloc->invalidateBuffer(m_obbBuffer_final);
+
+  shaderio::OBB* obbPtr = reinterpret_cast<shaderio::OBB*>(m_obbBuffer_final.mapping);
+  return obbPtr[0];
+}

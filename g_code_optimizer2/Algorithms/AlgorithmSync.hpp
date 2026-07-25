@@ -25,7 +25,7 @@ public:
   AlgorithmSync() = default;
   ~AlgorithmSync() { stopAlgorithm(); }
 
-  AlgoRequestAny startAlgorithm(AlgorithmType algoType, unsigned int maxEvals);
+  AlgoRequestAny startAlgorithm(AlgorithmType algoType, unsigned int maxEvals, float targetVal);
 
   void stopAlgorithm();
 
@@ -41,7 +41,8 @@ private:
   std::optional<AlgoTask>    task;
   std::unique_ptr<Algorithm> algorithm;
 
-  int  maxEvals       = 0;
-  int  iterationCount = 0;
-  bool forceDone      = false;
+  int   maxEvals       = 0;
+  float targetVal      = 0;
+  int   iterationCount = 0;
+  bool  forceDone      = false;
 };

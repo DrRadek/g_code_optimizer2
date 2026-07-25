@@ -12,18 +12,18 @@
 
 namespace nvshaders {
 
-class AABBCompute
+class OBBCompute
 {
 public:
-  AABBCompute() {};
-  ~AABBCompute() { assert(m_device == VK_NULL_HANDLE); }  //  "Missing to call deinit"
+  OBBCompute() {};
+  ~OBBCompute() { assert(m_device == VK_NULL_HANDLE); }  //  "Missing to call deinit"
 
-  VkResult init(VkCommandBuffer cmd, nvvk::ResourceAllocator* alloc, std::span<const uint32_t> spirv, std::vector<shaderio::float3> vertices);
-  void cleanupAfterInit(nvvk::ResourceAllocator* alloc);
-  void deinit();
+  VkResult init(VkCommandBuffer cmd, nvvk::ResourceAllocator* alloc, std::vector<shaderio::float3>& vertices);
+  void     cleanupAfterInit();
+  void     deinit();
 
   void           runCompute(VkCommandBuffer cmd, const shaderio::float4x4 projInvMatrix);
-  shaderio::AABB readResult(nvvk::ResourceAllocator* alloc);
+  shaderio::OBB readResult();
 
 private:
   nvvk::ResourceAllocator* m_alloc{};
@@ -31,18 +31,18 @@ private:
   VkDevice             m_device{};
   nvvk::DescriptorPack m_descriptorPack;
   VkPipelineLayout     m_pipelineLayout{};
-  VkPipeline           m_aabbPipelinePass1{};
-  VkPipeline           m_aabbPipelinePass2{};
+  VkPipeline           m_obbPipelinePass1{};
+  VkPipeline           m_obbPipelinePass2{};
 
   nvutils::PerformanceTimer m_timer;  // Timer for performance measurement
 
   nvvk::Buffer m_vertBuffer;
-  nvvk::Buffer m_aabbBuffer_partial;
-  nvvk::Buffer m_aabbBuffer_final;
+  nvvk::Buffer m_obbBuffer_partial;
+  nvvk::Buffer m_obbBuffer_final;
 
   nvvk::Buffer stagingBuffer;
 
-  shaderio::aabb_Params aabb_params_data{};
+  shaderio::obb_Params obb_params_data{};
 
   nvvk::WriteSetContainer writeSetContainer;
 };

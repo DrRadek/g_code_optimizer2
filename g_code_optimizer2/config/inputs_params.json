@@ -4,14 +4,15 @@
   "headless": false,
   "closeOnDone": false,
 
-  "textureResolution": 0,
-  "voxelSpacing" : 0.1,
+  "textureResolution": 200,
+  "voxelSpacing" : 0,
 
   "inputStl": "",
   "outputStl": "",
 
   "runs" : 1,
   "maxEvals": 0,
+  "targetVal":0,
   "outputStats": "",
 
   "outputQuat": "",

@@ -59,6 +59,34 @@ function(setup_rt_tutorial_sample)
     )
     FetchContent_MakeAvailable(nlohmann_json)
 
+    # nvpro_core2
+    set(ZSTD_LEGACY_SUPPORT OFF CACHE BOOL "Disable zstd legacy support" FORCE)
+    FetchContent_Declare(
+        nvpro_core2
+        GIT_REPOSITORY https://github.com/DrRadek/nvpro_core2.git # my fork
+        GIT_TAG        e0e473e0186071c5c0691f4c2b84a9e4d0a34d61
+        GIT_SUBMODULES_RECURSE TRUE
+    )
+    FetchContent_MakeAvailable(nvpro_core2)
+    include(${nvpro_core2_SOURCE_DIR}/cmake/Setup.cmake)
+
+    # Compiler options
+    if (MSVC)
+        target_compile_options(g_code_optimizer2 PRIVATE
+            #/O2
+            /arch:AVX2
+            /openmp:llvm
+            /openmp:experimental
+        )
+        #target_compile_options(g_code_optimizer2 PRIVATE /FA)
+    else()
+        target_compile_options(g_code_optimizer2 PRIVATE
+            -O3
+            -mavx2
+            -fopenmp
+        )
+    endif()
+
     # Link libraries and include directories (consistent across all samples)
     target_link_libraries(${PROJECT_NAME} PRIVATE
         nvpro2::nvapp

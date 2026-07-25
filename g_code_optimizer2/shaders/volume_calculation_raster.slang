@@ -68,7 +68,7 @@ PSout fragmentMain(VSout stage)
 {
   PSout output;
 
-  float volume = (1 - stage.sv_position.z) * (pushConst.aabbMax.z - pushConst.aabbMin.z);
+  float volume = (1 - stage.sv_position.z) * (pushConst.obbMax.z - pushConst.obbMin.z);
   output.volume = volume;
 
   // Relative visual color

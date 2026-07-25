@@ -1,6 +1,6 @@
 {
-  "N": 2000,
-  "K": 60,
+  "N": 500,
+  "K": 20,
 
   "KPointsDeltaStart":0.1,
   "KPointsDeltaEnd":0.03,

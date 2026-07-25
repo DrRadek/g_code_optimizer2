@@ -15,4 +15,8 @@ void importStlData(GltfSceneResource&             sceneResource,
                    bool                           importInstance = false);
 
 std::vector<shaderio::float3> exportVerticesFromStlTriangles(std::vector<openstl::Triangle> triangles);
+inline std::tuple<std::vector<float>, std::vector<float>, std::vector<float>> exportXYZFromStlTriangles(std::vector<openstl::Triangle> triangles)
+{
+  return openstl::convertToXYZArrays(triangles);
+}
 }  // namespace nvsamples
