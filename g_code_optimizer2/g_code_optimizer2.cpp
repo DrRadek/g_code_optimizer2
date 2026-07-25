@@ -2,8 +2,8 @@
 // #define USE_NSIGHT_AFTERMATH  // (not always on, as it slows down the application)
 
 // Slow flag for benchmark before and after
-#define USE_SLOW_AABB
-#undef USE_SLOW_AABB
+#define USE_SLOW_OBB
+#undef USE_SLOW_OBB
 
 #define TINYGLTF_IMPLEMENTATION         // Implementation of the GLTF loader library
 #define STB_IMAGE_IMPLEMENTATION        // Implementation of the image loading library
@@ -65,8 +65,8 @@
 // STL utils
 #include "stl_utils.hpp"
 
-// AABB calculation
-#include "aabb_compute.hpp"
+// OBB calculation
+#include "obb_compute.hpp"
 
 // Volume integration
 #include "volume_integrate_compute.hpp"
@@ -87,8 +87,8 @@
 // Python
 #include "python_volume_forwarder.hpp"
 
-// Benchmark for AABB
-#include "aabb_benchmark.hpp"
+// Benchmark for OBB
+#include "obb_benchmark.hpp"
 
 // Json, app config
 #include "include/json_helpers.hpp"
@@ -207,10 +207,10 @@ public:
     // The VMA allocator is used for all allocations, the staging uploader will use it for staging buffers and images
     m_stagingUploader.init(&m_allocator, true);
 
-    constexpr bool benchmark_aabb = false;
-    if(benchmark_aabb)
+    constexpr bool benchmark_obb = false;
+    if(benchmark_obb)
     {
-      AABB_Benchmark(*m_app, m_allocator).Start();
+      OBB_Benchmark(*m_app, m_allocator).Start();
       throw std::runtime_error("Benchmark finished.");
     }
 
@@ -270,8 +270,8 @@ public:
       createRayTracingPipeline();        // Create pipeline structure and SBT
     }
 
-    if(m_useGpuForAABB)
-      m_aabbCompute.cleanupAfterInit();
+    if(m_useGpuForOBB)
+      m_obbCompute.cleanupAfterInit();
 
     m_volumeIntegrateCompute.init(&m_allocator, volume_integrate_slang);
     m_volumeSumCompute.init(&m_allocator, volumesum_compute_slang);
@@ -279,8 +279,8 @@ public:
     // Calculate limits
     {
       updateViewMatrixFromCamera();
-      RecalculateAABB();
-      maxSupportHeight = glm::distance(aabbMin, aabbMax);
+      RecalculateOBB();
+      maxSupportHeight = glm::distance(obbMin, obbMax);
       minCellSize      = maxSupportHeight / (float)maxResolutionHeight;
 
       std::cout << "max support height: " << maxSupportHeight << "\n";
@@ -293,7 +293,7 @@ public:
         throw std::runtime_error(error);
       }
 
-      maxVolume = (aabbMax.x - aabbMin.x) * (aabbMax.y - aabbMin.y) * (aabbMax.z - aabbMin.z);
+      maxVolume = (obbMax.x - obbMin.x) * (obbMax.y - obbMin.y) * (obbMax.z - obbMin.z);
     }
 
     // Load algo type to start
@@ -356,8 +356,8 @@ public:
     m_gBuffers.deinit();
     m_stagingUploader.deinit();
 
-    if(m_useGpuForAABB)
-      m_aabbCompute.deinit();
+    if(m_useGpuForOBB)
+      m_obbCompute.deinit();
 
     m_volumeIntegrateCompute.deinit();
     m_volumeSumCompute.deinit();
@@ -425,8 +425,8 @@ public:
       if(ImGui::CollapsingHeader("Algorith settings", ImGuiTreeNodeFlags_DefaultOpen))
       {
         PE::begin();
-        PE::SliderFloat3("Min aabb", glm::value_ptr(aabbMin), -21.0f, 21.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp, "Override aabb min");
-        PE::SliderFloat3("Max aabb", glm::value_ptr(aabbMax), -21.0f, 21.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp, "Override aabb max");
+        PE::SliderFloat3("Min obb", glm::value_ptr(obbMin), -21.0f, 21.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp, "Override obb min");
+        PE::SliderFloat3("Max obb", glm::value_ptr(obbMax), -21.0f, 21.0f, "%.2f", ImGuiSliderFlags_AlwaysClamp, "Override obb max");
         PE::SliderFloat("volume", &volume, 1e5, 1e8, "%.2f", ImGuiSliderFlags_AlwaysClamp, "volume");
         PE::SliderFloat("min volume", &minVolume, 1e5, 1e8, "%.2f", ImGuiSliderFlags_AlwaysClamp, "min volume");
 
@@ -576,8 +576,8 @@ public:
     // Update view matrix
     updateViewMatrixFromCamera();
 
-    // Recalculate AABB
-    RecalculateAABB();
+    // Recalculate OBB
+    RecalculateOBB();
 
     // Update resolution to fit the space
     updateResolution();
@@ -804,12 +804,12 @@ public:
   {
     NVVK_DBG_SCOPE(cmd);  // <-- Helps to debug in NSight
 
-    float     width      = aabbMax.x - aabbMin.x;
-    float     height     = aabbMax.y - aabbMin.y;
+    float     width      = obbMax.x - obbMin.x;
+    float     height     = obbMax.y - obbMin.y;
     float     halfStepX  = 0.5f * width / float(m_currentRenderResolution.width - 1);
     float     halfStepY  = 0.5f * height / float(m_currentRenderResolution.height - 1);
-    glm::mat4 projMatrix = glm::orthoRH_ZO(aabbMin.x - halfStepX, aabbMax.x + halfStepX, aabbMax.y + halfStepY,
-                                           aabbMin.y - halfStepY, -aabbMax.z, -aabbMin.z);
+    glm::mat4 projMatrix = glm::orthoRH_ZO(obbMin.x - halfStepX, obbMax.x + halfStepX, obbMax.y + halfStepY,
+                                           obbMin.y - halfStepY, -obbMax.z, -obbMin.z);
 
     m_sceneResource.sceneInfo.viewProjMatrix = projMatrix * viewMatrix;   // Combine the view and projection matrices
     m_sceneResource.sceneInfo.projInvMatrix  = glm::inverse(projMatrix);  // Inverse projection matrix
@@ -840,8 +840,8 @@ public:
 
     // Push constant information, see usage later
     shaderio::TutoPushConstant pushValues{.sceneInfoAddress = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,  // Pass the address of the scene information buffer to the shader
-                                          .aabbMin          = aabbMin,
-                                          .aabbMax          = aabbMax,
+                                          .obbMin          = obbMin,
+                                          .obbMax          = obbMax,
                                           .maxSupportHeight = maxSupportHeight};
     const VkPushConstantsInfo pushInfo{
         .sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
@@ -1215,8 +1215,8 @@ public:
 
     // Push constant information
     shaderio::RtxPushConstant pushValues{.sceneInfoAddress = (shaderio::GltfSceneInfo*)m_sceneResource.bSceneInfo.address,
-                                         .aabbMin          = aabbMin,
-                                         .aabbMax          = aabbMax,
+                                         .obbMin          = obbMin,
+                                         .obbMax          = obbMax,
                                          .maxSupportHeight = maxSupportHeight};
     const VkPushConstantsInfo pushInfo{.sType      = VK_STRUCTURE_TYPE_PUSH_CONSTANTS_INFO,
                                        .layout     = m_rtPipelineLayout,
@@ -1238,50 +1238,50 @@ public:
                                       {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}});
   }
 
-  // Recalculate AABB (GPU implementation)
-  void RecalculateAABB()
+  // Recalculate OBB (GPU implementation)
+  void RecalculateOBB()
   {
 
     //auto sceneInfo = m_sceneResource.bSceneInfo;
 
-    if(m_useGpuForAABB)
+    if(m_useGpuForOBB)
     {
       VkCommandBuffer cmd    = m_app->createTempCmdBuffer();
       auto            matrix = viewInvMatrix;
-      m_aabbCompute.runCompute(cmd, matrix);
+      m_obbCompute.runCompute(cmd, matrix);
       m_app->submitAndWaitTempCmdBuffer(cmd);
 
-      auto result = m_aabbCompute.readResult();
-      aabbMin     = result.min;
-      aabbMax     = result.max;
+      auto result = m_obbCompute.readResult();
+      obbMin     = result.min;
+      obbMax     = result.max;
     }
     else
     {
       auto matrix = ((glm::mat3x3)viewInvMatrix);
 
-#ifdef USE_SLOW_AABB
-      aabbMin = aabbVertices[0];
-      aabbMax = aabbMin;
+#ifdef USE_SLOW_OBB
+      obbMin = obbVertices[0];
+      obbMax = obbMin;
 
-      const size_t n = aabbVertices.size();
+      const size_t n = obbVertices.size();
       for(size_t i = 1; i < n; ++i)
       {
-        const auto& multiplied = aabbVertices[i] * matrix;
+        const auto& multiplied = obbVertices[i] * matrix;
 
-        aabbMax[0] = std::max(aabbMax[0], multiplied[0]);
-        aabbMin[0] = std::min(aabbMin[0], multiplied[0]);
-        aabbMax[1] = std::max(aabbMax[1], multiplied[1]);
-        aabbMin[1] = std::min(aabbMin[1], multiplied[1]);
-        aabbMax[2] = std::max(aabbMax[2], multiplied[2]);
-        aabbMin[2] = std::min(aabbMin[2], multiplied[2]);
+        obbMax[0] = std::max(obbMax[0], multiplied[0]);
+        obbMin[0] = std::min(obbMin[0], multiplied[0]);
+        obbMax[1] = std::max(obbMax[1], multiplied[1]);
+        obbMin[1] = std::min(obbMin[1], multiplied[1]);
+        obbMax[2] = std::max(obbMax[2], multiplied[2]);
+        obbMin[2] = std::min(obbMin[2], multiplied[2]);
       }
 #else
 
-      const size_t n = aabbVerticesX.size();
+      const size_t n = obbVerticesX.size();
 
-      const float* vx_data = aabbVerticesX.data();
-      const float* vy_data = aabbVerticesY.data();
-      const float* vz_data = aabbVerticesZ.data();
+      const float* vx_data = obbVerticesX.data();
+      const float* vy_data = obbVerticesY.data();
+      const float* vz_data = obbVerticesZ.data();
 
       float minX, minY, minZ;
       float maxX, maxY, maxZ;
@@ -1301,7 +1301,7 @@ public:
 
         glm::vec3 min{};
         glm::vec3 max{};
-        ProcessAABBChunk(matrix, min, max, start, end);
+        ProcessOBBChunk(matrix, min, max, start, end);
 
 #pragma omp critical
         {
@@ -1315,16 +1315,16 @@ public:
         }
       }
 
-      aabbMin = {minX, minY, minZ};
-      aabbMax = {maxX, maxY, maxZ};
+      obbMin = {minX, minY, minZ};
+      obbMax = {maxX, maxY, maxZ};
 #endif
     }
 
-    aabbMax.z += glm::max(aabbMax.z * 0.00001f, 0.001f);  // Add small epsilon
+    obbMax.z += glm::max(obbMax.z * 0.00001f, 0.001f);  // Add small epsilon
   }
 
-#ifndef USE_SLOW_AABB
-  void ProcessAABBChunk(glm::mat3x3& matrix, glm::vec3& min_result, glm::vec3& max_result, size_t start, size_t end)
+#ifndef USE_SLOW_OBB
+  void ProcessOBBChunk(glm::mat3x3& matrix, glm::vec3& min_result, glm::vec3& max_result, size_t start, size_t end)
   {
     __m256 r00 = _mm256_set1_ps(matrix[0][0]);
     __m256 r01 = _mm256_set1_ps(matrix[0][1]);
@@ -1350,9 +1350,9 @@ public:
     for(size_t i = start; i < end; i += 8)
     {
       // load 8 values from the X,Y,Z vectors
-      __m256 vx = _mm256_load_ps(&aabbVerticesX[i]);
-      __m256 vy = _mm256_load_ps(&aabbVerticesY[i]);
-      __m256 vz = _mm256_load_ps(&aabbVerticesZ[i]);
+      __m256 vx = _mm256_load_ps(&obbVerticesX[i]);
+      __m256 vy = _mm256_load_ps(&obbVerticesY[i]);
+      __m256 vz = _mm256_load_ps(&obbVerticesZ[i]);
 
       // " Fused multiply + add"
       // r02 * vz + r01 * vy + r00 * vx
@@ -1408,8 +1408,8 @@ public:
 
   void IntegrateVolume(VkCommandBuffer cmd)
   {
-    float width  = (aabbMax.x - aabbMin.x);
-    float height = (aabbMax.y - aabbMin.y);
+    float width  = (obbMax.x - obbMin.x);
+    float height = (obbMax.y - obbMin.y);
 
     // (n) * (m) => (n-1) * (m-1)
     m_volumeIntegrateCompute.runCompute(cmd, m_gBuffers.getColorImageView(eImgVolume), &m_outVolumeBuffer,
@@ -1722,15 +1722,15 @@ public:
     // Import the data
     nvsamples::importStlData(m_sceneResource, triangles, m_stagingUploader);
 
-    if(m_useGpuForAABB)
+    if(m_useGpuForOBB)
     {
       std::vector<glm::vec3> vertices = nvsamples::exportVerticesFromStlTriangles(triangles);
-      m_aabbCompute.init(cmd, &m_allocator, vertices);
+      m_obbCompute.init(cmd, &m_allocator, vertices);
     }
     else
     {
-#ifdef USE_SLOW_AABB
-      aabbVertices = nvsamples::exportVerticesFromStlTriangles(triangles);
+#ifdef USE_SLOW_OBB
+      obbVertices = nvsamples::exportVerticesFromStlTriangles(triangles);
 #else
       auto [X, Y, Z]     = nvsamples::exportXYZFromStlTriangles(triangles);
       int n              = X.size();
@@ -1748,9 +1748,9 @@ public:
         Z[i] = Z[i - 1];
       }
 
-      aabbVerticesX = std::move(X);
-      aabbVerticesY = std::move(Y);
-      aabbVerticesZ = std::move(Z);
+      obbVerticesX = std::move(X);
+      obbVerticesY = std::move(Y);
+      obbVerticesZ = std::move(Z);
 #endif
     }
   }
@@ -1802,8 +1802,8 @@ public:
 
   void updateResolution()
   {
-    float width  = aabbMax.x - aabbMin.x;
-    float height = aabbMax.y - aabbMin.y;
+    float width  = obbMax.x - obbMin.x;
+    float height = obbMax.y - obbMin.y;
     // dynamically calculate n, m to keep fixed area size
     if(useFixedAreaResolution)
     {
@@ -1916,11 +1916,11 @@ private:
   //shaderio::float4x4          bestMatrixFromAlgo;
   //float                       minVolumeFromAlgo = std::numeric_limits<float>().max();
 
-  // AABB
-  nvshaders::AABBCompute m_aabbCompute{};
-  glm::vec3              aabbMin{-40, -40, -40};
-  glm::vec3              aabbMax{40, 40, 40};
-  // Used to calculate AABB
+  // OBB
+  nvshaders::OBBCompute m_obbCompute{};
+  glm::vec3              obbMin{-40, -40, -40};
+  glm::vec3              obbMax{40, 40, 40};
+  // Used to calculate OBB
   std::vector<openstl::Triangle> triangles;
 
   // CPU helper variables
@@ -1976,16 +1976,16 @@ private:
 
   // Ray tracing toggle
   bool m_useRayTracing = false;  // Set to true to use ray tracing, false for rasterization
-  bool m_useGpuForAABB = false;  // Set to true to use GPU for bounding box calculations, CPU if false
+  bool m_useGpuForOBB = false;  // Set to true to use GPU for bounding box calculations, CPU if false
 
-#ifdef USE_SLOW_AABB
+#ifdef USE_SLOW_OBB
   // Slow version
-  std::vector<glm::vec3> aabbVertices{};
+  std::vector<glm::vec3> obbVertices{};
 #else
   // Fast version
-  std::vector<float> aabbVerticesX{};
-  std::vector<float> aabbVerticesY{};
-  std::vector<float> aabbVerticesZ{};
+  std::vector<float> obbVerticesX{};
+  std::vector<float> obbVerticesY{};
+  std::vector<float> obbVerticesZ{};
 #endif
 };
 

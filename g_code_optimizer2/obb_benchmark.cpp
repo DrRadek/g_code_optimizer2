@@ -1,8 +1,8 @@
-#include "aabb_benchmark.hpp"
+#include "obb_benchmark.hpp"
 
 #include <omp.h>
 
-AABB_Benchmark::Result AABB_Benchmark::process_chunk(size_t start, size_t end)
+OBB_Benchmark::Result OBB_Benchmark::process_chunk(size_t start, size_t end)
 {
   __m256 r00 = _mm256_set1_ps(projInvMatrix_3x3[0][0]);
   __m256 r01 = _mm256_set1_ps(projInvMatrix_3x3[0][1]);
@@ -82,14 +82,14 @@ AABB_Benchmark::Result AABB_Benchmark::process_chunk(size_t start, size_t end)
 }
 
 
-void AABB_Benchmark::Start()
+void OBB_Benchmark::Start()
 {
   // Better waiting - reusing buffer
   AddTest("GPU", [this]() {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     vkBeginCommandBuffer(cmd, &beginInfo);
-    aabbCompute.runCompute(cmd, projInvMatrix);
+    obbCompute.runCompute(cmd, projInvMatrix);
     vkEndCommandBuffer(cmd);
 
     VkSubmitInfo submitInfo{};
@@ -101,16 +101,16 @@ void AABB_Benchmark::Start()
     vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
     vkResetFences(device, 1, &fence);
 
-    auto result = aabbCompute.readResult();
+    auto result = obbCompute.readResult();
     return Result{result.min, result.max};
   });
 
   AddTest("GPU_temp_buffer", [this]() {
     auto cmd = m_app.createTempCmdBuffer();
-    aabbCompute.runCompute(cmd, projInvMatrix);
+    obbCompute.runCompute(cmd, projInvMatrix);
     m_app.submitAndWaitTempCmdBuffer(cmd);
 
-    auto result = aabbCompute.readResult();
+    auto result = obbCompute.readResult();
     return Result{result.min, result.max};
   });
 
@@ -446,7 +446,7 @@ void AABB_Benchmark::Start()
 }
 
 // Run all registered tests m times
-void AABB_Benchmark::RunTests(int m)
+void OBB_Benchmark::RunTests(int m)
 {
   std::cout << "\n=== Benchmark Results ===\n";
   for(const auto& [name, fn] : tests_)
@@ -496,7 +496,7 @@ void AABB_Benchmark::RunTests(int m)
   }
 }
 
-void AABB_Benchmark::SetupTests(int n)
+void OBB_Benchmark::SetupTests(int n)
 {
   // Fill in some data to test on
   this->n            = n;
@@ -530,20 +530,20 @@ void AABB_Benchmark::SetupTests(int n)
   std::cout << "    min   : (" << vertices[0].x << ", " << vertices[0].y << ", " << vertices[0].z << ")\n"
             << "    max   : (" << vertices[n - 1].x << ", " << vertices[n - 1].y << ", " << vertices[n - 1].z << ")\n";
 
-  // Re-create AABB shader
+  // Re-create OBB shader
   static bool first_init = true;
   if(!first_init)
   {
-    aabbCompute.deinit();
+    obbCompute.deinit();
   }
   else
   {
     first_init = false;
   }
   auto cmd2 = m_app.createTempCmdBuffer();
-  aabbCompute.init(cmd2, &alloc, vertices);
+  obbCompute.init(cmd2, &alloc, vertices);
   m_app.submitAndWaitTempCmdBuffer(cmd2);
-  aabbCompute.cleanupAfterInit();
+  obbCompute.cleanupAfterInit();
 
   // Vulkan Setup
   VkCommandPoolCreateInfo poolInfo{};

@@ -3,19 +3,19 @@
 #include "nvshaders/functions.h.slang"
 
 
-groupshared float3 sMin[AABB_SHADER_WG_SIZE];
-groupshared float3 sMax[AABB_SHADER_WG_SIZE];
+groupshared float3 sMin[OBB_SHADER_WG_SIZE];
+groupshared float3 sMax[OBB_SHADER_WG_SIZE];
 
-[[vk::push_constant]] ConstantBuffer<aabb_Params> params;
+[[vk::push_constant]] ConstantBuffer<obb_Params> params;
 
-[[vk::binding(aabb_Binding::Vertices)]]     StructuredBuffer<float3> vertices;
-[[vk::binding(aabb_Binding::PartialAabb)]]  RWStructuredBuffer<AABB> partialAabb;
-[[vk::binding(aabb_Binding::OutAabb)]]      RWStructuredBuffer<AABB> outAabb;
+[[vk::binding(obb_Binding::Vertices)]]     StructuredBuffer<float3> vertices;
+[[vk::binding(obb_Binding::PartialObb)]]  RWStructuredBuffer<OBB> partialObb;
+[[vk::binding(obb_Binding::OutObb)]]      RWStructuredBuffer<OBB> outObb;
 
 // Called with x WGs
 [shader("compute")]
-[numthreads(AABB_SHADER_WG_SIZE, 1, 1)]
-void CalculateAABB_Pass1(
+[numthreads(OBB_SHADER_WG_SIZE, 1, 1)]
+void CalculateOBB_Pass1(
     uint3 globalThreadID : SV_DispatchThreadID,
     uint3 groupID        : SV_GroupID,
     uint3 localThreadID  : SV_GroupThreadID,
@@ -24,12 +24,12 @@ void CalculateAABB_Pass1(
     uint gid = groupID.x;
     uint lid = localThreadID.x;
 
-    // Initialize this thread's partial AABB
+    // Initialize this thread's partial OBB
     float3 localMin = float3(float.maxValue);
     float3 localMax = float3(float.minValue);
 
-    // Each thread processes triangles with stride AABB_SHADER_WG_SIZE
-    for(uint i = lid + gid * AABB_SHADER_WG_SIZE; i < params.vertCount; i += AABB_SHADER_WG_SIZE * params.groupSize)
+    // Each thread processes triangles with stride OBB_SHADER_WG_SIZE
+    for(uint i = lid + gid * OBB_SHADER_WG_SIZE; i < params.vertCount; i += OBB_SHADER_WG_SIZE * params.groupSize)
     {
         float3 t = mul((float3x3)params.projInvMatrix, vertices[i]);
         //float3 t = mul(params.projInvMatrix, float4(vertices[i], 0)).xyz;
@@ -47,8 +47,8 @@ void CalculateAABB_Pass1(
 
 // Called with 1 final WG
 [shader("compute")]
-[numthreads(AABB_SHADER_WG_SIZE, 1, 1)]
-void CalculateAABB_Pass2(
+[numthreads(OBB_SHADER_WG_SIZE, 1, 1)]
+void CalculateOBB_Pass2(
     uint3 globalThreadID : SV_DispatchThreadID,
     uint3 groupID        : SV_GroupID,
     uint3 localThreadID  : SV_GroupThreadID,
@@ -61,10 +61,10 @@ void CalculateAABB_Pass2(
     float3 localMin = float3(float.maxValue);
     float3 localMax = float3(float.minValue);
 
-    // Reduce all partial AABBs
-    for (uint i = lid; i < params.groupSize; i += AABB_SHADER_WG_SIZE)
+    // Reduce all partial OBBs
+    for (uint i = lid; i < params.groupSize; i += OBB_SHADER_WG_SIZE)
     {
-        AABB a = partialAabb[i];
+        OBB a = partialObb[i];
         localMin = min(localMin, a.min);
         localMax = max(localMax, a.max);
     }
@@ -78,7 +78,7 @@ void CalculateAABB_Pass2(
 
 void Reduce(uint lid, uint gid, bool writeToPartial){
  // Parallel reduction
-    uint stride = AABB_SHADER_WG_SIZE >> 1;
+    uint stride = OBB_SHADER_WG_SIZE >> 1;
     while(stride > 0)
     {
         if (lid < stride)
@@ -90,10 +90,10 @@ void Reduce(uint lid, uint gid, bool writeToPartial){
         stride >>= 1;
     }
 
-    // Thread 0 writes AABB
+    // Thread 0 writes OBB
     if (lid == 0)
     {
-        AABB outVal;
+        OBB outVal;
         if (params.vertCount == 0)
         {
             outVal.min = float3(float.maxValue,  float.maxValue,  float.maxValue);
@@ -105,8 +105,8 @@ void Reduce(uint lid, uint gid, bool writeToPartial){
             outVal.max = sMax[0];
         }
         if(writeToPartial)
-            partialAabb[gid] = outVal;
+            partialObb[gid] = outVal;
         else
-            outAabb[gid] = outVal;
+            outObb[gid] = outVal;
     }
 }

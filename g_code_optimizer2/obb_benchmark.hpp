@@ -13,14 +13,14 @@
 
 #include <nvapp/application.hpp>
 
-#include "aabb_compute.hpp"
+#include "obb_compute.hpp"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <nlohmann/json.hpp>
 
-class AABB_Benchmark
+class OBB_Benchmark
 {
 private:
   struct Result
@@ -41,17 +41,17 @@ private:
   };
   std::vector<Stats> stats{};
 
-  AABB_Benchmark::Result process_chunk(size_t start, size_t end);
+  OBB_Benchmark::Result process_chunk(size_t start, size_t end);
 
 public:
-  AABB_Benchmark(nvapp::Application& m_app, nvvk::ResourceAllocator& alloc)
+  OBB_Benchmark(nvapp::Application& m_app, nvvk::ResourceAllocator& alloc)
       : alloc(alloc)
       , m_app(m_app)
   {
     device = m_app.getDevice();
   }
 
-  ~AABB_Benchmark() { aabbCompute.deinit(); }
+  ~OBB_Benchmark() { obbCompute.deinit(); }
 
   void Start();
 
@@ -73,7 +73,7 @@ private:
   std::vector<Test> tests_;
 
   // Helpers for shader preparations
-  nvshaders::AABBCompute   aabbCompute{};
+  nvshaders::OBBCompute   obbCompute{};
   nvvk::ResourceAllocator& alloc;
   nvapp::Application&      m_app;
   VkDevice                 device;

@@ -21,7 +21,7 @@ VkResult nvshaders::VolumeSumCompute::init(nvvk::ResourceAllocator* alloc, std::
   //alloc->createBuffer(stagingBuffer, sizeof(float), VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_2_TRANSFER_DST_BIT,
   //                    VMA_MEMORY_USAGE_GPU_TO_CPU, VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
 
-  //alloc->createBuffer(m_aabbBuffer_final, sizeof(shaderio::AABB), VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT,
+  //alloc->createBuffer(m_obbBuffer_final, sizeof(shaderio::OBB), VK_BUFFER_USAGE_2_STORAGE_BUFFER_BIT,
   //                    VMA_MEMORY_USAGE_AUTO,  // Was there: VK_BUFFER_USAGE_2_TRANSFER_SRC_BIT, VMA_MEMORY_USAGE_GPU_TO_CPU
   //                    VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT);
   NVVK_DBG_NAME(stagingBuffer.buffer);

@@ -95,17 +95,17 @@ void rgenMain()
   // Retrieve scene information from push constants
   GltfSceneInfo* sceneInfo = pushConst.sceneInfoAddress;
 
-  float3 aabbMin = pushConst.aabbMin;
-  float3 aabbMax = pushConst.aabbMax;
+  float3 obbMin = pushConst.obbMin;
+  float3 obbMax = pushConst.obbMax;
   int2 launchIDCorrected = int2(launchID.x, launchSize.y - launchID.y - 1);
-  float2 pixelOffset = pushConst.aabbMin.xy + (pushConst.aabbMax.xy - pushConst.aabbMin.xy) * ((float2)launchIDCorrected / (float2)(launchSize - 1));
+  float2 pixelOffset = pushConst.obbMin.xy + (pushConst.obbMax.xy - pushConst.obbMin.xy) * ((float2)launchIDCorrected / (float2)(launchSize - 1));
 
   // Set ray tracing flags (0 = no special flags)
   const uint   rayFlags   = 0;
 
 	// Construct view-space points (camera at origin, looking along +Z in view space)
-	float3 topView    = float3(pixelOffset.x, pixelOffset.y, pushConst.aabbMax.z);
-	float3 bottomView = float3(pixelOffset.x, pixelOffset.y, pushConst.aabbMin.z);
+	float3 topView    = float3(pixelOffset.x, pixelOffset.y, pushConst.obbMax.z);
+	float3 bottomView = float3(pixelOffset.x, pixelOffset.y, pushConst.obbMin.z);
 
 	// Transform by camera rotation only.
 	// by using w=0 in the mul with a float4 which ignores translation component.
